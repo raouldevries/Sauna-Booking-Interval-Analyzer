@@ -901,6 +901,14 @@ Use this heatmap to optimize your team schedule - ensure adequate coverage durin
 
                     location_recurring = location_recurring.sort_values('Recurring Customers', ascending=False)
 
+                    # Add total row
+                    total_row = pd.DataFrame({
+                        'Location': ['Total'],
+                        'Recurring Customers': [total_recurring],
+                        '% of Total': [100.0]
+                    })
+                    location_recurring = pd.concat([location_recurring, total_row], ignore_index=True)
+
                     st.dataframe(location_recurring, use_container_width=True, hide_index=True)
 
                 # Insights
