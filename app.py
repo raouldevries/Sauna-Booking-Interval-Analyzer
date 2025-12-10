@@ -598,51 +598,76 @@ Use this heatmap to optimize your team schedule - ensure adequate coverage durin
                     temp_analysis.columns = ['Avg Lead Time (days)', 'Number of Bookings']
                     temp_analysis = temp_analysis.reset_index()
 
-                    # Create dual-axis chart
-                    fig_temp = go.Figure()
+                    # Combine data for bubble plot
+                    # temp_analysis already has temp_category, Avg Lead Time, Number of Bookings
+                    # We need to merge with temp_stats to get Avg Temp and % of Total
 
-                    # Add bar chart for number of bookings
-                    fig_temp.add_trace(go.Bar(
-                        x=temp_analysis['temp_category'],
-                        y=temp_analysis['Number of Bookings'],
-                        name='Number of Bookings',
-                        marker_color='lightblue',
-                        yaxis='y'
-                    ))
+                    # Calculate temp_stats early to get Avg Temp (°C)
+                    temp_stats_early = data_with_temp.groupby('temp_category', observed=True).agg({
+                        'temperature': 'mean'
+                    }).round(1)
+                    temp_stats_early.columns = ['Avg Temp (°C)']
 
-                    # Add line chart for average lead time
-                    fig_temp.add_trace(go.Scatter(
-                        x=temp_analysis['temp_category'],
-                        y=temp_analysis['Avg Lead Time (days)'],
-                        name='Avg Lead Time',
-                        mode='lines+markers',
-                        marker=dict(size=10, color='red'),
-                        line=dict(width=3, color='red'),
-                        yaxis='y2'
-                    ))
+                    # Merge temp_analysis with average temperature
+                    bubble_data = temp_analysis.merge(
+                        temp_stats_early,
+                        left_on='temp_category',
+                        right_index=True
+                    )
 
-                    # Update layout with dual y-axes
+                    # Calculate percentage of total
+                    total_bookings = bubble_data['Number of Bookings'].sum()
+                    bubble_data['% of Total'] = (bubble_data['Number of Bookings'] / total_bookings * 100).round(1)
+
+                    # Create labels for bubbles
+                    bubble_data['label'] = bubble_data.apply(
+                        lambda row: f"{row['temp_category']}<br>({row['% of Total']}%)",
+                        axis=1
+                    )
+
+                    # Create bubble plot
+                    fig_temp = px.scatter(
+                        bubble_data,
+                        x='Avg Temp (°C)',
+                        y='Avg Lead Time (days)',
+                        size='% of Total',
+                        text='label',
+                        hover_data={
+                            'temp_category': True,
+                            'Avg Temp (°C)': ':.1f',
+                            'Avg Lead Time (days)': ':.1f',
+                            'Number of Bookings': ':,',
+                            '% of Total': ':.1f',
+                            'label': False
+                        },
+                        size_max=70,
+                        title="Booking Behavior by Temperature"
+                    )
+
+                    # Update bubble appearance
+                    fig_temp.update_traces(
+                        marker=dict(
+                            color='#1f77b4',  # Blue color matching app theme
+                            opacity=0.7,
+                            line=dict(width=1, color='white')
+                        ),
+                        textposition='top center',
+                        textfont=dict(size=10)
+                    )
+
+                    # Update layout
                     fig_temp.update_layout(
-                        title="Booking Volume & Lead Time by Temperature",
-                        xaxis=dict(title='Temperature at Booking Time'),
+                        xaxis=dict(
+                            title='Average Temperature (°C)',
+                            range=[0, bubble_data['Avg Temp (°C)'].max() * 1.1]
+                        ),
                         yaxis=dict(
-                            title='Number of Bookings',
-                            side='left'
-                        ),
-                        yaxis2=dict(
                             title='Average Lead Time (days)',
-                            side='right',
-                            overlaying='y'
+                            range=[0, bubble_data['Avg Lead Time (days)'].max() * 1.15]
                         ),
-                        hovermode='x unified',
                         height=500,
-                        legend=dict(
-                            orientation="h",
-                            yanchor="bottom",
-                            y=1.02,
-                            xanchor="right",
-                            x=1
-                        )
+                        showlegend=False,
+                        hovermode='closest'
                     )
 
                     st.plotly_chart(fig_temp, use_container_width=True)
@@ -682,10 +707,16 @@ Use this heatmap to optimize your team schedule - ensure adequate coverage durin
 
                     # Insights
                     st.info("""
-                    **How to interpret:**
-                    - **High bookings + short lead time**: Customers book spontaneously in this temperature range
-                    - **High bookings + long lead time**: Customers plan ahead for sauna visits in this weather
-                    - **Low bookings**: This temperature range sees less sauna demand
+                    **How to read the bubble plot:**
+                    - **Horizontal position** (X-axis): Average temperature when booking was made
+                    - **Vertical position** (Y-axis): How far in advance customers book
+                    - **Bubble size**: Share of total bookings (larger = more bookings)
+                    - **Pattern**: Warmer weather typically correlates with more advance planning
+
+                    **Interpretation:**
+                    - **Large bubbles high on chart**: Popular temperature range where customers plan ahead
+                    - **Large bubbles low on chart**: Popular temperature range with spontaneous bookings
+                    - **Small bubbles**: Temperature ranges with less sauna demand
                     """)
 
             # Export functionality
