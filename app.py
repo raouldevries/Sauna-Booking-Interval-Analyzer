@@ -409,7 +409,7 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
             fig_dist.update_layout(
                 showlegend=False,
                 height=400,
-                yaxis=dict(range=[0, distribution_pct.max() * 1.15])  # Add 15% padding at top for labels
+                yaxis=dict(range=[0, 100])  # Always show 0-100% for percentage data
             )
 
             st.plotly_chart(fig_dist, use_container_width=True)
