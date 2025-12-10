@@ -5,14 +5,18 @@ from datetime import datetime, timedelta
 
 # Page configuration
 st.set_page_config(
-    page_title="Sauna Booking Analyzer",
-    page_icon="📅",
+    page_title="Kuuma Booking Analyzer",
+    page_icon="🔥",
     layout="wide"
 )
 
-# Main title
-st.title("📅 Sauna Booking Interval Analyzer")
-st.markdown("**Analyze the time between booking creation and customer visit**")
+# Header with logo
+col1, col2 = st.columns([1, 5])
+with col1:
+    st.image("https://kuuma.nl/wp-content/themes/kuuma/images/logo.svg", width=120)
+with col2:
+    st.title("Kuuma Booking Interval Analyzer")
+    st.markdown("**Analyze the time between booking creation and customer visit**")
 
 # Sidebar
 st.sidebar.header("Upload & Configure")
