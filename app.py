@@ -1035,13 +1035,19 @@ else:
     2. **Map columns** to tell the app which columns contain:
        - Booking IDs (to match records)
        - Dates (booking creation and visit dates)
-       - Locations (optional)
+       - Locations (optional - supports 'Tour' or 'Activity' columns)
+       - Email addresses (optional - for customer loyalty analysis)
 
-    3. **View insights**:
-       - Average and median booking lead times
-       - Distribution charts
-       - Trends over time
-       - Location comparisons
+    3. **Analyze booking patterns**:
+       - **Booking Intervals**: Average and median lead times, same-day booking rates, distribution charts
+       - **Visit Time Heatmap**: Day-of-week × hour-of-day patterns to optimize staffing and operations
+       - **Location Performance**: Compare booking behavior and capacity across locations
+       - **Temperature Impact**: Optional analysis showing how weather affects booking advance planning
 
-    4. **Export** your results as CSV for further analysis
+    4. **Understand customer loyalty**:
+       - **Customer Segmentation**: Five-tier system (One-time, Light, Regular, Frequent, VIP)
+       - **Location Loyalty**: See which locations retain customers best
+       - **Recurring Customer Metrics**: Track retention rates and multi-location behavior
+
+    5. **Export** your results as CSV for further analysis or reporting
     """)
