@@ -421,41 +421,6 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
                 Different locations may show different booking patterns, helping you understand customer behavior per branch.
                 """)
 
-            # Trend chart
-            st.markdown("### Average Lead Time Over Time")
-
-            st.markdown("""
-            This chart shows how booking behavior changes over time. Each point represents the average lead time for bookings in that week.
-
-            **What to look for:**
-            - **Upward trends**: Customers are booking further in advance
-            - **Downward trends**: Customers are booking more spontaneously (last-minute)
-            - **Seasonal patterns**: Do customers plan more during certain periods?
-            - **Sudden changes**: Could indicate marketing campaigns, events, or external factors
-            """)
-
-            # Group by week
-            filtered_data_sorted = filtered_data.copy()
-            filtered_data_sorted['week'] = filtered_data_sorted['visit_date'].dt.to_period('W').dt.start_time
-
-            trend_data = filtered_data_sorted.groupby('week')['interval_days'].mean().reset_index()
-            trend_data.columns = ['Week', 'Average Interval']
-
-            if len(trend_data) > 1:
-                fig_trend = px.line(
-                    trend_data,
-                    x='Week',
-                    y='Average Interval',
-                    labels={'Week': 'Week', 'Average Interval': 'Average Lead Time (days)'},
-                    title="Booking lead time trends"
-                )
-                fig_trend.update_traces(mode='lines+markers', marker=dict(size=6))
-                fig_trend.update_layout(height=400)
-
-                st.plotly_chart(fig_trend, use_container_width=True)
-            else:
-                st.info("Not enough data to show trend over time. Upload data spanning multiple weeks.")
-
             # Location breakdown
             if location_col != "None" and len(selected_locations) > 0:
                 st.markdown("### Breakdown by Location")
