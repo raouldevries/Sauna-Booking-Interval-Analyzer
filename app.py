@@ -923,6 +923,34 @@ Use this heatmap to optimize your team schedule - ensure adequate coverage durin
 
                     st.dataframe(location_display, use_container_width=True, hide_index=True)
 
+                    # Explanation of location-level vs global recurring rate
+                    global_total = len(customer_frequency)
+                    global_recurring = len(customer_frequency[customer_frequency['bookings'] > 1])
+                    global_rate = (global_recurring / global_total * 100) if global_total > 0 else 0
+
+                    with st.expander("Why is the recurring rate different from the top metrics?"):
+                        st.markdown(f"""
+                        **Top Metrics (Global View):** {global_rate:.1f}% recurring rate
+                        - Counts each customer once across all locations
+                        - Example: If Sarah visits Matsu and Noord, she counts as 1 total customer
+
+                        **Location Table (Location View):** {avg_recurring_rate:.1f}% average recurring rate
+                        - Counts each customer once per location they visit
+                        - Example: If Sarah visits Matsu and Noord, she counts as 1 customer at Matsu + 1 customer at Noord
+
+                        **Why the difference?**
+                        - Total Customers in table: {total_customers:,} (sum per location)
+                        - Total Unique Customers (top): {global_total:,} (unique people)
+                        - Difference: {total_customers - global_total:,} extra counts from customers visiting multiple locations
+
+                        **What this reveals:**
+                        Customers who visit multiple locations are counted at each location, which inflates the location-level totals. This is actually good news - it means your recurring customers are loyal across multiple locations, not just one!
+
+                        **When to use each metric:**
+                        - Use {global_rate:.1f}% for overall business health and customer retention strategy
+                        - Use location rates (e.g., 38.7%, 39.6%) for comparing individual location performance
+                        """)
+
                 # Insights
                 st.info("""
                 **Understanding Customer Tiers:**
