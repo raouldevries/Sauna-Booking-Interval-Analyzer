@@ -883,6 +883,11 @@ Use this heatmap to optimize your team schedule - ensure adequate coverage durin
 
                     location_recurring = recurring_customer_data.groupby('location')['email'].nunique().reset_index()
                     location_recurring.columns = ['Location', 'Recurring Customers']
+
+                    # Calculate percentage of total
+                    total_recurring = location_recurring['Recurring Customers'].sum()
+                    location_recurring['% of Total'] = (location_recurring['Recurring Customers'] / total_recurring * 100).round(1)
+
                     location_recurring = location_recurring.sort_values('Recurring Customers', ascending=False)
 
                     st.dataframe(location_recurring, use_container_width=True, hide_index=True)
