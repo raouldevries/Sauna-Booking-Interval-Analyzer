@@ -19,7 +19,7 @@ with col1:
     st.image("https://kuuma.nl/wp-content/themes/kuuma/images/logo.svg", width=120)
 with col2:
     st.title("Kuuma Booking Analyzer")
-    st.markdown("**Analyze the time between booking creation and customer visit**")
+    st.markdown("**Customer insights & booking intelligence**")
 
 # Sidebar
 st.sidebar.header("Upload & Configure")
@@ -892,24 +892,34 @@ Use this heatmap to optimize your team schedule - ensure adequate coverage durin
                     # Recurring customers per location
                     st.markdown("#### Recurring Customers by Location")
 
+                    # Get total customers per location (all customers, not just recurring)
+                    location_total = customer_data.groupby('location')['email'].nunique().reset_index()
+                    location_total.columns = ['Location', 'Total Customers']
+
+                    # Get recurring customers per location
                     location_recurring = recurring_customer_data.groupby('location')['email'].nunique().reset_index()
                     location_recurring.columns = ['Location', 'Recurring Customers']
 
-                    # Calculate percentage of total
-                    total_recurring = location_recurring['Recurring Customers'].sum()
-                    location_recurring['% of Total'] = (location_recurring['Recurring Customers'] / total_recurring * 100).round(1)
+                    # Merge and calculate recurring rate
+                    location_stats = location_total.merge(location_recurring, on='Location')
+                    location_stats['Recurring Rate (%)'] = (location_stats['Recurring Customers'] / location_stats['Total Customers'] * 100).round(1)
 
-                    location_recurring = location_recurring.sort_values('Recurring Customers', ascending=False)
+                    # Keep only the columns we want to display
+                    location_display = location_stats[['Location', 'Recurring Customers', 'Recurring Rate (%)']].copy()
+                    location_display = location_display.sort_values('Recurring Customers', ascending=False)
 
-                    # Add total row
+                    # Add total row with average recurring rate
+                    total_recurring = location_display['Recurring Customers'].sum()
+                    avg_recurring_rate = location_stats['Recurring Rate (%)'].mean().round(1)
+
                     total_row = pd.DataFrame({
                         'Location': ['Total'],
                         'Recurring Customers': [total_recurring],
-                        '% of Total': [100.0]
+                        'Recurring Rate (%)': [avg_recurring_rate]
                     })
-                    location_recurring = pd.concat([location_recurring, total_row], ignore_index=True)
+                    location_display = pd.concat([location_display, total_row], ignore_index=True)
 
-                    st.dataframe(location_recurring, use_container_width=True, hide_index=True)
+                    st.dataframe(location_display, use_container_width=True, hide_index=True)
 
                 # Insights
                 st.info("""
