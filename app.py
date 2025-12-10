@@ -827,7 +827,7 @@ Use this heatmap to optimize your team schedule - ensure adequate coverage durin
 
                 # Location loyalty analysis (only if location is selected)
                 if location_col != "None":
-                    st.markdown("#### Location Loyalty")
+                    st.markdown("#### Location Loyalty Among Recurring Customers")
 
                     # For recurring customers, count how many locations they visit
                     recurring_customer_data = customer_data[customer_data['email'].isin(
@@ -860,19 +860,30 @@ Use this heatmap to optimize your team schedule - ensure adequate coverage durin
                     )
                     loyalty_distribution = loyalty_distribution.sort_values('Loyalty Type')
 
-                    col1, col2 = st.columns([2, 1])
+                    # Side-by-side layout: 60% chart, 40% table
+                    col1, col2 = st.columns([3, 2])
 
                     with col1:
-                        # Loyalty pie chart
+                        # Loyalty donut chart
                         fig_loyalty = px.pie(
                             loyalty_distribution,
                             values='Customers',
                             names='Loyalty Type',
-                            title='Location Loyalty Among Recurring Customers',
                             hole=0.4
                         )
 
-                        fig_loyalty.update_layout(height=400)
+                        fig_loyalty.update_layout(
+                            height=400,
+                            showlegend=True,
+                            legend=dict(
+                                orientation="h",
+                                yanchor="bottom",
+                                y=-0.2,
+                                xanchor="center",
+                                x=0.5
+                            ),
+                            margin=dict(t=20, b=80)
+                        )
                         st.plotly_chart(fig_loyalty, use_container_width=True)
 
                     with col2:
