@@ -468,161 +468,108 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
                     filtered_data['visit_date'].dt.minute.max() > 0):
 
                     st.markdown("---")
-                    st.markdown("### Sauna Visit Patterns by Day & Time")
+                    st.markdown("### Sauna Visit Heatmap")
 
                     st.markdown("""
-                    Understand when customers actually visit the sauna throughout the week. This helps with:
-                    - **Staffing optimization** during peak visit times
-                    - **Capacity planning** for high-demand periods
-                    - **Day-of-week patterns** to inform operational scheduling
+                    Visualize visit patterns by day of week and time of day. Darker colors indicate higher visit volumes.
+                    Select a location to see its specific pattern, or choose "All Locations" for aggregate view.
                     """)
 
-                    # Create copy for time analysis to avoid modifying filtered_data
+                    # Prepare data
                     time_data = filtered_data.copy()
                     time_data['visit_hour'] = time_data['visit_date'].dt.hour
-                    time_data['visit_minute'] = time_data['visit_date'].dt.minute
                     time_data['day_of_week'] = time_data['visit_date'].dt.day_name()
 
-                    # Order days of week properly
+                    # Order days of week
                     day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
                     time_data['day_of_week'] = pd.Categorical(time_data['day_of_week'], categories=day_order, ordered=True)
 
-                    # Calculate visits by day of week and location
-                    day_stats = time_data.groupby(['location', 'day_of_week'], observed=True).agg({
+                    # Location filter dropdown
+                    available_locations = sorted(time_data['location'].unique().tolist())
+                    location_options = ['All Locations'] + available_locations
+
+                    selected_heatmap_location = st.selectbox(
+                        'Select Location',
+                        options=location_options,
+                        index=0,
+                        key='heatmap_location_selector'
+                    )
+
+                    # Filter data by selected location
+                    if selected_heatmap_location == 'All Locations':
+                        heatmap_data = time_data
+                    else:
+                        heatmap_data = time_data[time_data['location'] == selected_heatmap_location]
+
+                    # Group by day and hour
+                    visit_counts = heatmap_data.groupby(['day_of_week', 'visit_hour'], observed=True).agg({
                         'booking_id': 'count'
                     }).reset_index()
-                    day_stats.columns = ['Location', 'Day of Week', 'Visits']
+                    visit_counts.columns = ['Day', 'Hour', 'Visits']
 
-                    # Create grouped bar chart for day of week patterns
-                    fig_weekly = px.bar(
-                        day_stats,
-                        x='Day of Week',
-                        y='Visits',
-                        color='Location',
-                        barmode='group',
-                        title='Sauna Visits by Day of Week',
-                        labels={'Day of Week': 'Day of Week', 'Visits': 'Number of Visits'},
-                        category_orders={'Day of Week': day_order}
-                    )
-
-                    fig_weekly.update_layout(
-                        height=450,
-                        hovermode='x unified',
-                        legend=dict(
-                            orientation="h",
-                            yanchor="bottom",
-                            y=1.02,
-                            xanchor="right",
-                            x=1
-                        )
-                    )
-
-                    st.plotly_chart(fig_weekly, use_container_width=True)
-
-                    # Calculate average visit time per location per day of week
-                    st.markdown("#### Average Visit Time by Location and Day")
-
-                    visit_time_summary = []
-                    for location in time_data['location'].unique():
-                        for day in day_order:
-                            loc_day_data = time_data[(time_data['location'] == location) & (time_data['day_of_week'] == day)]
-                            if len(loc_day_data) > 0:
-                                total_minutes = (loc_day_data['visit_hour'] * 60 + loc_day_data['visit_minute']).mean()
-                                avg_hour = int(total_minutes // 60)
-                                avg_min = int(total_minutes % 60)
-                                avg_time = f"{avg_hour:02d}:{avg_min:02d}"
-
-                                visit_time_summary.append({
-                                    'Location': location,
-                                    'Day': day,
-                                    'Avg Visit Time': avg_time,
-                                    'Total Visits': len(loc_day_data)
-                                })
-
-                    visit_time_df = pd.DataFrame(visit_time_summary)
-
-                    # Pivot for better readability
-                    visit_time_pivot = visit_time_df.pivot(
-                        index='Location',
-                        columns='Day',
-                        values='Avg Visit Time'
-                    )
-                    # Reorder columns by day of week
-                    visit_time_pivot = visit_time_pivot[day_order]
-
-                    st.dataframe(visit_time_pivot, use_container_width=True)
-
-                    # Hourly distribution across all days
-                    st.markdown("#### Visit Volume by Hour of Day")
-
-                    hourly_dist = time_data.groupby(['location', 'visit_hour']).agg({
-                        'booking_id': 'count'
-                    }).reset_index()
-                    hourly_dist.columns = ['Location', 'Hour', 'Visits']
-
-                    # Ensure all hours 0-23 are represented
+                    # Create complete grid (all day/hour combinations)
                     all_combinations = pd.MultiIndex.from_product(
-                        [time_data['location'].unique(), range(24)],
-                        names=['Location', 'Hour']
+                        [day_order, range(24)],
+                        names=['Day', 'Hour']
                     ).to_frame(index=False)
-                    hourly_dist = all_combinations.merge(hourly_dist, on=['Location', 'Hour'], how='left').fillna(0)
-                    hourly_dist['Visits'] = hourly_dist['Visits'].astype(int)
 
-                    # Create grouped bar chart
-                    fig_hourly = px.bar(
-                        hourly_dist,
-                        x='Hour',
-                        y='Visits',
-                        color='Location',
-                        barmode='group',
-                        title='Visit Volume Throughout the Day',
-                        labels={'Hour': 'Hour of Day (24-hour format)', 'Visits': 'Number of Visits'}
+                    heatmap_grid = all_combinations.merge(visit_counts, on=['Day', 'Hour'], how='left').fillna(0)
+                    heatmap_grid['Visits'] = heatmap_grid['Visits'].astype(int)
+
+                    # Pivot to create heatmap matrix
+                    heatmap_matrix = heatmap_grid.pivot(index='Hour', columns='Day', values='Visits')
+                    heatmap_matrix = heatmap_matrix[day_order]  # Ensure correct day order
+
+                    # Create heatmap
+                    fig_heatmap = go.Figure(data=go.Heatmap(
+                        z=heatmap_matrix.values,
+                        x=day_order,
+                        y=[f"{h:02d}:00" for h in range(24)],
+                        colorscale='Purples',
+                        hovertemplate='%{x}<br>%{y}<br>%{z} visits<extra></extra>',
+                        showscale=True,
+                        colorbar=dict(title='Visits')
+                    ))
+
+                    fig_heatmap.update_layout(
+                        title=f'Visit Heatmap - {selected_heatmap_location}',
+                        xaxis_title='Day of Week',
+                        yaxis_title='Hour of Day',
+                        height=600,
+                        xaxis=dict(side='bottom'),
+                        yaxis=dict(autorange='reversed')  # Hours from top to bottom
                     )
 
-                    fig_hourly.update_layout(
-                        height=450,
-                        xaxis=dict(
-                            tickmode='linear',
-                            tick0=0,
-                            dtick=2,
-                            ticksuffix=':00'
-                        ),
-                        hovermode='x unified',
-                        legend=dict(
-                            orientation="h",
-                            yanchor="bottom",
-                            y=1.02,
-                            xanchor="right",
-                            x=1
-                        )
-                    )
+                    st.plotly_chart(fig_heatmap, use_container_width=True)
 
-                    st.plotly_chart(fig_hourly, use_container_width=True)
+                    # Peak time insights
+                    if len(visit_counts) > 0:
+                        peak_row = visit_counts.loc[visit_counts['Visits'].idxmax()]
+                        peak_day = peak_row['Day']
+                        peak_hour = int(peak_row['Hour'])
+                        peak_count = int(peak_row['Visits'])
 
-                    # Calculate peak visit times
-                    overall_peak_day = day_stats.groupby('Day of Week', observed=True)['Visits'].sum().idxmax()
-                    overall_peak_hour = hourly_dist.groupby('Hour')['Visits'].sum().idxmax()
-                    peak_hour_count = int(hourly_dist.groupby('Hour')['Visits'].sum().max())
+                        st.info(f"""
+**Peak Time for {selected_heatmap_location}**: {peak_day} at {peak_hour:02d}:00 - {(peak_hour+1):02d}:00 with {peak_count} visits.
+                        """)
 
-                    st.info(f"""
-**Busiest Day**: {overall_peak_day} has the most sauna visits across all locations.
-**Peak Visit Hour**: {overall_peak_hour:02d}:00 - {(overall_peak_hour+1):02d}:00 with {peak_hour_count} visits.
-Consider ensuring adequate staffing and capacity during these peak periods.
-                    """)
-
-                    with st.expander("Understanding Visit Patterns"):
+                    with st.expander("How to Read the Heatmap"):
                         st.markdown("""
-**Day of Week Chart** shows which days are busiest for actual sauna visits at each location. This helps identify weekend vs. weekday patterns.
-
-**Average Visit Time Table** displays the typical time of day people visit on each day of the week, per location. Use this to identify patterns like "Saturday evening rush" or "Monday morning crowd".
-
-**Hourly Distribution** shows visit volume across all 24 hours, helping identify peak times for staffing needs.
+**Understanding the Visualization:**
+- **X-axis**: Days of the week (Monday through Sunday)
+- **Y-axis**: Hours of the day (00:00 to 23:00 in 24-hour format)
+- **Color intensity**: Darker purple = more visits, lighter = fewer visits
+- **Hover**: Move your mouse over any cell to see exact visit counts
 
 **Operational Insights:**
-- Peak days and hours indicate when to maximize staff presence and sauna capacity
-- Off-peak times might be good for maintenance or special promotions
-- Location differences reveal customer demographics (e.g., business district vs. residential area patterns)
-- Day-of-week patterns help optimize weekly scheduling and resource allocation
+- **Dark clusters** indicate peak times requiring maximum staffing and capacity
+- **Light areas** show off-peak times suitable for maintenance or promotions
+- **Vertical patterns** (dark columns) reveal busy days regardless of time
+- **Horizontal patterns** (dark rows) show popular time slots across the week
+- **Compare locations** using the dropdown to identify unique patterns per branch
+
+**Staffing Strategy:**
+Use this heatmap to optimize your team schedule - ensure adequate coverage during dark (high-traffic) periods and consider reduced staffing during light (low-traffic) times.
                         """)
 
             # Temperature Analysis
