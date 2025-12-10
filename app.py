@@ -486,76 +486,129 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
 
                 st.dataframe(location_stats, use_container_width=True)
 
-                # Time-of-Day Booking Analysis
+                # Sauna Visit Time Analysis (Day of Week & Time of Day)
                 # Check if we have time data (not just dates)
-                if (filtered_data['booking_date'].dt.hour.max() > 0 or
-                    filtered_data['booking_date'].dt.minute.max() > 0):
+                if (filtered_data['visit_date'].dt.hour.max() > 0 or
+                    filtered_data['visit_date'].dt.minute.max() > 0):
 
                     st.markdown("---")
-                    st.markdown("### Time-of-Day Booking Analysis")
+                    st.markdown("### Sauna Visit Patterns by Day & Time")
 
                     st.markdown("""
-                    Understand when customers make their bookings throughout the day. This helps with:
-                    - **Customer service staffing** during peak booking hours
-                    - **System capacity planning** for high-traffic periods
-                    - **Location-specific patterns** that may inform operations
+                    Understand when customers actually visit the sauna throughout the week. This helps with:
+                    - **Staffing optimization** during peak visit times
+                    - **Capacity planning** for high-demand periods
+                    - **Day-of-week patterns** to inform operational scheduling
                     """)
 
                     # Create copy for time analysis to avoid modifying filtered_data
                     time_data = filtered_data.copy()
-                    time_data['booking_hour'] = time_data['booking_date'].dt.hour
-                    time_data['booking_minute'] = time_data['booking_date'].dt.minute
+                    time_data['visit_hour'] = time_data['visit_date'].dt.hour
+                    time_data['visit_minute'] = time_data['visit_date'].dt.minute
+                    time_data['day_of_week'] = time_data['visit_date'].dt.day_name()
 
-                    # Calculate average booking time per location
-                    time_summary = []
-                    for location in time_data['location'].unique():
-                        loc_data = time_data[time_data['location'] == location]
-                        total_minutes = (loc_data['booking_hour'] * 60 + loc_data['booking_minute']).mean()
-                        avg_hour = int(total_minutes // 60)
-                        avg_min = int(total_minutes % 60)
-                        avg_time = f"{avg_hour:02d}:{avg_min:02d}"
+                    # Order days of week properly
+                    day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+                    time_data['day_of_week'] = pd.Categorical(time_data['day_of_week'], categories=day_order, ordered=True)
 
-                        time_summary.append({
-                            'Location': location,
-                            'Average Booking Time': avg_time,
-                            'Total Bookings': len(loc_data)
-                        })
-
-                    time_summary_df = pd.DataFrame(time_summary).sort_values('Total Bookings', ascending=False)
-                    st.dataframe(time_summary_df, use_container_width=True)
-
-                    # Calculate hourly distribution
-                    hourly_dist = time_data.groupby(['location', 'booking_hour']).agg({
+                    # Calculate visits by day of week and location
+                    day_stats = time_data.groupby(['location', 'day_of_week'], observed=True).agg({
                         'booking_id': 'count'
                     }).reset_index()
-                    hourly_dist.columns = ['Location', 'Hour', 'Bookings']
+                    day_stats.columns = ['Location', 'Day of Week', 'Visits']
 
-                    # Ensure all hours 0-23 are represented for complete x-axis
+                    # Create grouped bar chart for day of week patterns
+                    fig_weekly = px.bar(
+                        day_stats,
+                        x='Day of Week',
+                        y='Visits',
+                        color='Location',
+                        barmode='group',
+                        title='Sauna Visits by Day of Week',
+                        labels={'Day of Week': 'Day of Week', 'Visits': 'Number of Visits'},
+                        category_orders={'Day of Week': day_order}
+                    )
+
+                    fig_weekly.update_layout(
+                        height=450,
+                        hovermode='x unified',
+                        legend=dict(
+                            orientation="h",
+                            yanchor="bottom",
+                            y=1.02,
+                            xanchor="right",
+                            x=1
+                        )
+                    )
+
+                    st.plotly_chart(fig_weekly, use_container_width=True)
+
+                    # Calculate average visit time per location per day of week
+                    st.markdown("#### Average Visit Time by Location and Day")
+
+                    visit_time_summary = []
+                    for location in time_data['location'].unique():
+                        for day in day_order:
+                            loc_day_data = time_data[(time_data['location'] == location) & (time_data['day_of_week'] == day)]
+                            if len(loc_day_data) > 0:
+                                total_minutes = (loc_day_data['visit_hour'] * 60 + loc_day_data['visit_minute']).mean()
+                                avg_hour = int(total_minutes // 60)
+                                avg_min = int(total_minutes % 60)
+                                avg_time = f"{avg_hour:02d}:{avg_min:02d}"
+
+                                visit_time_summary.append({
+                                    'Location': location,
+                                    'Day': day,
+                                    'Avg Visit Time': avg_time,
+                                    'Total Visits': len(loc_day_data)
+                                })
+
+                    visit_time_df = pd.DataFrame(visit_time_summary)
+
+                    # Pivot for better readability
+                    visit_time_pivot = visit_time_df.pivot(
+                        index='Location',
+                        columns='Day',
+                        values='Avg Visit Time'
+                    )
+                    # Reorder columns by day of week
+                    visit_time_pivot = visit_time_pivot[day_order]
+
+                    st.dataframe(visit_time_pivot, use_container_width=True)
+
+                    # Hourly distribution across all days
+                    st.markdown("#### Visit Volume by Hour of Day")
+
+                    hourly_dist = time_data.groupby(['location', 'visit_hour']).agg({
+                        'booking_id': 'count'
+                    }).reset_index()
+                    hourly_dist.columns = ['Location', 'Hour', 'Visits']
+
+                    # Ensure all hours 0-23 are represented
                     all_combinations = pd.MultiIndex.from_product(
                         [time_data['location'].unique(), range(24)],
                         names=['Location', 'Hour']
                     ).to_frame(index=False)
                     hourly_dist = all_combinations.merge(hourly_dist, on=['Location', 'Hour'], how='left').fillna(0)
-                    hourly_dist['Bookings'] = hourly_dist['Bookings'].astype(int)
+                    hourly_dist['Visits'] = hourly_dist['Visits'].astype(int)
 
                     # Create grouped bar chart
                     fig_hourly = px.bar(
                         hourly_dist,
                         x='Hour',
-                        y='Bookings',
+                        y='Visits',
                         color='Location',
                         barmode='group',
-                        title='Booking Volume by Hour of Day',
-                        labels={'Hour': 'Hour of Day (24-hour format)', 'Bookings': 'Number of Bookings'}
+                        title='Visit Volume Throughout the Day',
+                        labels={'Hour': 'Hour of Day (24-hour format)', 'Visits': 'Number of Visits'}
                     )
 
-                    # Customize layout
                     fig_hourly.update_layout(
-                        height=500,
+                        height=450,
                         xaxis=dict(
                             tickmode='linear',
                             tick0=0,
-                            dtick=2,  # Show every 2 hours for readability
+                            dtick=2,
                             ticksuffix=':00'
                         ),
                         hovermode='x unified',
@@ -570,27 +623,30 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
 
                     st.plotly_chart(fig_hourly, use_container_width=True)
 
-                    # Calculate overall peak booking hour
-                    peak_data = hourly_dist.groupby('Hour')['Bookings'].sum()
-                    peak_hour = peak_data.idxmax()
-                    peak_count = int(peak_data.max())
+                    # Calculate peak visit times
+                    overall_peak_day = day_stats.groupby('Day of Week', observed=True)['Visits'].sum().idxmax()
+                    overall_peak_hour = hourly_dist.groupby('Hour')['Visits'].sum().idxmax()
+                    peak_hour_count = int(hourly_dist.groupby('Hour')['Visits'].sum().max())
 
                     st.info(f"""
-**Peak Booking Hour**: {peak_hour:02d}:00 - {(peak_hour+1):02d}:00 with {peak_count} bookings across all locations.
-Consider ensuring customer service availability and system reliability during this time.
+**Busiest Day**: {overall_peak_day} has the most sauna visits across all locations.
+**Peak Visit Hour**: {overall_peak_hour:02d}:00 - {(overall_peak_hour+1):02d}:00 with {peak_hour_count} visits.
+Consider ensuring adequate staffing and capacity during these peak periods.
                     """)
 
-                    with st.expander("Understanding Time-of-Day Patterns"):
+                    with st.expander("Understanding Visit Patterns"):
                         st.markdown("""
-**Average Booking Time** shows the typical time of day when bookings are made at each location (weighted average across all bookings).
+**Day of Week Chart** shows which days are busiest for actual sauna visits at each location. This helps identify weekend vs. weekday patterns.
 
-**Hourly Distribution Chart** displays booking volume for each hour (0-23 in 24-hour format), grouped by location.
+**Average Visit Time Table** displays the typical time of day people visit on each day of the week, per location. Use this to identify patterns like "Saturday evening rush" or "Monday morning crowd".
+
+**Hourly Distribution** shows visit volume across all 24 hours, helping identify peak times for staffing needs.
 
 **Operational Insights:**
-- Peak hours indicate when your booking system experiences highest traffic
-- Location differences may reflect customer demographics or usage patterns
-- Hours with zero bookings might present opportunities for targeted promotions
-- Consider staffing customer service during identified peak periods
+- Peak days and hours indicate when to maximize staff presence and sauna capacity
+- Off-peak times might be good for maintenance or special promotions
+- Location differences reveal customer demographics (e.g., business district vs. residential area patterns)
+- Day-of-week patterns help optimize weekly scheduling and resource allocation
                         """)
 
             # Temperature Analysis
