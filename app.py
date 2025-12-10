@@ -406,7 +406,11 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
                 title="How far in advance do customers book?"
             )
             fig_dist.update_traces(marker_color='#1f77b4', text=text_labels, textposition='outside')
-            fig_dist.update_layout(showlegend=False, height=400)
+            fig_dist.update_layout(
+                showlegend=False,
+                height=400,
+                yaxis=dict(range=[0, distribution_pct.max() * 1.15])  # Add 15% padding at top for labels
+            )
 
             st.plotly_chart(fig_dist, use_container_width=True)
 
