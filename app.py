@@ -786,6 +786,12 @@ Use this heatmap to optimize your team schedule - ensure adequate coverage durin
                 recurring_customers = len(customer_frequency[customer_frequency['bookings'] > 1])
                 recurring_pct = (recurring_customers / total_customers * 100) if total_customers > 0 else 0
 
+                # Calculate percentage of total for each tier
+                tier_distribution['Percentage'] = (tier_distribution['Customers'] / total_customers * 100).round(1)
+
+                # Create text labels with percentage
+                tier_distribution['label'] = tier_distribution['Percentage'].apply(lambda x: f"{x}%")
+
                 # Display key metrics
                 col1, col2, col3 = st.columns(3)
                 with col1:
@@ -799,10 +805,10 @@ Use this heatmap to optimize your team schedule - ensure adequate coverage durin
                 fig_tiers = px.bar(
                     tier_distribution,
                     x='Tier',
-                    y='Customers',
+                    y='Percentage',
                     title='Customer Distribution by Tier',
-                    labels={'Tier': 'Customer Tier', 'Customers': 'Number of Customers'},
-                    text='Customers'
+                    labels={'Tier': 'Customer Tier', 'Percentage': 'Percentage of Total Customers'},
+                    text='label'
                 )
 
                 fig_tiers.update_traces(
@@ -811,9 +817,10 @@ Use this heatmap to optimize your team schedule - ensure adequate coverage durin
                 )
 
                 fig_tiers.update_layout(
-                    height=400,
+                    height=500,
                     showlegend=False,
-                    xaxis=dict(tickangle=0)
+                    xaxis=dict(tickangle=0),
+                    yaxis=dict(range=[0, 100])
                 )
 
                 st.plotly_chart(fig_tiers, use_container_width=True)
