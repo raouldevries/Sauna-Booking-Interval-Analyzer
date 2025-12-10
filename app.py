@@ -190,9 +190,12 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
     @st.cache_data
     def get_temperature_data(start_date, end_date, latitude=52.37, longitude=4.89):
         """
-        Fetch daily average temperature data from Open-Meteo API
+        Fetch daily average temperature data with fallback strategy
+        Primary: Open-Meteo API
+        Fallback: Meteostat library (no API key needed)
         Default coordinates: Amsterdam center (can be adjusted per location)
         """
+        # Try Open-Meteo first
         try:
             api_url = (
                 f"https://archive-api.open-meteo.com/v1/archive"
@@ -203,20 +206,41 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
                 f"&timezone=Europe%2FAmsterdam"
             )
             resp = requests.get(api_url, timeout=30)
+            resp.raise_for_status()
             data = resp.json()
 
-            if 'daily' not in data:
-                st.warning(f"Unexpected API response: {data}")
-                return None
-
-            temp_dates = pd.to_datetime(data['daily']['time'])
-            temp_values = data['daily']['temperature_2m_mean']
-
-            temp_df = pd.DataFrame({'date': temp_dates, 'temperature': temp_values})
-            return temp_df
+            if 'daily' in data:
+                temp_dates = pd.to_datetime(data['daily']['time'])
+                temp_values = data['daily']['temperature_2m_mean']
+                temp_df = pd.DataFrame({'date': temp_dates, 'temperature': temp_values})
+                return temp_df
         except Exception as e:
-            st.warning(f"Could not fetch temperature data: {str(e)}")
+            st.info(f"Open-Meteo unavailable, trying backup source... ({str(e)})")
+
+        # Fallback to Meteostat
+        try:
+            from meteostat import Point, Daily
+
+            location = Point(latitude, longitude)
+            data = Daily(location, start_date, end_date)
+            meteo_df = data.fetch()
+
+            if meteo_df is not None and not meteo_df.empty and 'tavg' in meteo_df.columns:
+                # Reset index to get dates as a column
+                meteo_df = meteo_df.reset_index()
+                # The index becomes 'time' column after reset
+                temp_df = pd.DataFrame({
+                    'date': pd.to_datetime(meteo_df['time']),
+                    'temperature': meteo_df['tavg']
+                })
+                # Remove NaN temperatures
+                temp_df = temp_df.dropna(subset=['temperature'])
+                return temp_df
+        except Exception as e:
+            st.warning(f"Could not fetch temperature data from any source: {str(e)}")
             return None
+
+        return None
 
     def add_temperature_to_bookings(bookings_df):
         """Add daily average temperature data to bookings based on booking date"""
@@ -435,6 +459,12 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
             if location_col != "None" and len(selected_locations) > 0:
                 st.markdown("### Breakdown by Location")
 
+                st.markdown("""
+                Compare booking behavior across different locations. **Average** shows all bookings (sensitive to advance planners),
+                while **Median** shows what a typical customer does (not affected by outliers). A large gap between them indicates
+                mixed booking patterns: mostly last-minute with some advance planners.
+                """)
+
                 location_stats = filtered_data.groupby('location').agg({
                     'booking_id': 'count',
                     'interval_days': ['mean', 'median']
@@ -524,6 +554,10 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
                     # Temperature statistics table
                     st.markdown("#### Temperature Breakdown")
 
+                    # Add month column to data
+                    data_with_temp['month'] = data_with_temp['booking_date'].dt.strftime('%B')
+
+                    # Calculate main statistics
                     temp_stats = data_with_temp.groupby('temp_category', observed=True).agg({
                         'booking_id': 'count',
                         'interval_days': ['mean', 'median'],
@@ -531,8 +565,22 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
                     }).round(1)
 
                     temp_stats.columns = ['Bookings', 'Avg Lead Time', 'Median Lead Time', 'Avg Temp (°C)']
+
+                    # Calculate common months separately
+                    common_months = []
+                    for category in temp_stats.index:
+                        category_data = data_with_temp[data_with_temp['temp_category'] == category]
+                        month_counts = category_data['month'].value_counts()
+                        if len(month_counts) > 0:
+                            # Get top 2 months
+                            top_months = month_counts.head(2).index.tolist()
+                            common_months.append(', '.join(top_months))
+                        else:
+                            common_months.append('N/A')
+
+                    temp_stats['Common Months'] = common_months
                     temp_stats['% of Total'] = (temp_stats['Bookings'] / temp_stats['Bookings'].sum() * 100).round(1)
-                    temp_stats = temp_stats[['Bookings', '% of Total', 'Avg Temp (°C)', 'Avg Lead Time', 'Median Lead Time']]
+                    temp_stats = temp_stats[['Bookings', '% of Total', 'Common Months', 'Avg Temp (°C)', 'Avg Lead Time', 'Median Lead Time']]
 
                     st.dataframe(temp_stats, use_container_width=True)
 

@@ -5,3 +5,4 @@ xlrd
 plotly
 requests
 numpy
+meteostat
