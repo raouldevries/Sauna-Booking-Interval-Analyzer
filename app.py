@@ -392,13 +392,20 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
             distribution = filtered_data['interval_category'].value_counts()
             distribution = distribution.reindex(category_order, fill_value=0)
 
+            # Calculate percentages
+            total_bookings = distribution.sum()
+            distribution_pct = (distribution / total_bookings * 100).round(1)
+
+            # Format text labels with percentage
+            text_labels = [f"{pct}%" for pct in distribution_pct.values]
+
             fig_dist = px.bar(
-                x=distribution.index,
-                y=distribution.values,
-                labels={'x': 'Lead Time', 'y': 'Number of Bookings'},
+                x=distribution_pct.index,
+                y=distribution_pct.values,
+                labels={'x': 'Lead Time', 'y': 'Percentage of Total Bookings'},
                 title="How far in advance do customers book?"
             )
-            fig_dist.update_traces(marker_color='#1f77b4', text=distribution.values, textposition='outside')
+            fig_dist.update_traces(marker_color='#1f77b4', text=text_labels, textposition='outside')
             fig_dist.update_layout(showlegend=False, height=400)
 
             st.plotly_chart(fig_dist, use_container_width=True)
