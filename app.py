@@ -132,6 +132,18 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
         help="Column containing location/branch names for comparison"
     )
 
+    # Email column (for recurring customer analysis)
+    default_email_col = "Email address" if "Email address" in df1.columns else None
+    email_options = ["None"] + df1.columns.tolist()
+    email_default_index = email_options.index(default_email_col) if default_email_col in email_options else 0
+
+    email_col = st.sidebar.selectbox(
+        "Email Address (optional)",
+        options=email_options,
+        index=email_default_index,
+        help="Column containing customer email for recurring customer analysis"
+    )
+
     # Data processing
     @st.cache_data
     def process_data(df1, df2, id_col_1, date_col_1, id_col_2, visit_col_2, location_col):
@@ -718,6 +730,175 @@ Use this heatmap to optimize your team schedule - ensure adequate coverage durin
                     - **Large bubbles low on chart**: Popular temperature range with spontaneous bookings
                     - **Small bubbles**: Temperature ranges with less sauna demand
                     """)
+
+            # Recurring Customer Analysis
+            if email_col != "None":
+                st.markdown("---")
+                st.markdown("### Recurring Customer Analysis")
+
+                st.markdown("""
+                Analyze customer loyalty and repeat visit patterns using email addresses.
+                Understand which customers return and how frequently they book.
+                """)
+
+                # Prepare customer data
+                customer_data = df1[[id_col_1, email_col]].copy()
+                customer_data.columns = ['booking_id', 'email']
+
+                # Add location if available
+                if location_col != "None":
+                    customer_data['location'] = df1[location_col]
+
+                # Remove rows with missing emails
+                customer_data = customer_data[customer_data['email'].notna() & (customer_data['email'] != '')]
+
+                # Count bookings per customer
+                customer_frequency = customer_data.groupby('email').agg({
+                    'booking_id': 'count'
+                }).reset_index()
+                customer_frequency.columns = ['email', 'bookings']
+
+                # Categorize into tiers
+                def categorize_customer(bookings):
+                    if bookings == 1:
+                        return "One-time"
+                    elif 2 <= bookings <= 3:
+                        return "Light (2-3)"
+                    elif 4 <= bookings <= 6:
+                        return "Regular (4-6)"
+                    elif 7 <= bookings <= 10:
+                        return "Frequent (7-10)"
+                    else:
+                        return "VIP (11+)"
+
+                customer_frequency['tier'] = customer_frequency['bookings'].apply(categorize_customer)
+
+                # Tier order for consistent display
+                tier_order = ['One-time', 'Light (2-3)', 'Regular (4-6)', 'Frequent (7-10)', 'VIP (11+)']
+                customer_frequency['tier'] = pd.Categorical(customer_frequency['tier'], categories=tier_order, ordered=True)
+
+                # Customer tier distribution
+                tier_distribution = customer_frequency['tier'].value_counts().reindex(tier_order, fill_value=0).reset_index()
+                tier_distribution.columns = ['Tier', 'Customers']
+
+                # Calculate metrics
+                total_customers = len(customer_frequency)
+                recurring_customers = len(customer_frequency[customer_frequency['bookings'] > 1])
+                recurring_pct = (recurring_customers / total_customers * 100) if total_customers > 0 else 0
+
+                # Display key metrics
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Total Unique Customers", f"{total_customers:,}")
+                with col2:
+                    st.metric("Recurring Customers", f"{recurring_customers:,}")
+                with col3:
+                    st.metric("Recurring Rate", f"{recurring_pct:.1f}%")
+
+                # Customer tier chart
+                fig_tiers = px.bar(
+                    tier_distribution,
+                    x='Tier',
+                    y='Customers',
+                    title='Customer Distribution by Tier',
+                    labels={'Tier': 'Customer Tier', 'Customers': 'Number of Customers'},
+                    text='Customers'
+                )
+
+                fig_tiers.update_traces(
+                    marker_color='#1f77b4',
+                    textposition='outside'
+                )
+
+                fig_tiers.update_layout(
+                    height=400,
+                    showlegend=False,
+                    xaxis=dict(tickangle=0)
+                )
+
+                st.plotly_chart(fig_tiers, use_container_width=True)
+
+                # Location loyalty analysis (only if location is selected)
+                if location_col != "None":
+                    st.markdown("#### Location Loyalty")
+
+                    # For recurring customers, count how many locations they visit
+                    recurring_customer_data = customer_data[customer_data['email'].isin(
+                        customer_frequency[customer_frequency['bookings'] > 1]['email']
+                    )]
+
+                    locations_per_customer = recurring_customer_data.groupby('email')['location'].nunique().reset_index()
+                    locations_per_customer.columns = ['email', 'locations_visited']
+
+                    # Categorize loyalty
+                    def categorize_loyalty(num_locations):
+                        if num_locations == 1:
+                            return "Single location"
+                        elif num_locations == 2:
+                            return "2 locations"
+                        else:
+                            return "3+ locations"
+
+                    locations_per_customer['loyalty_type'] = locations_per_customer['locations_visited'].apply(categorize_loyalty)
+
+                    loyalty_distribution = locations_per_customer['loyalty_type'].value_counts().reset_index()
+                    loyalty_distribution.columns = ['Loyalty Type', 'Customers']
+
+                    # Reorder for consistent display
+                    loyalty_order = ['Single location', '2 locations', '3+ locations']
+                    loyalty_distribution['Loyalty Type'] = pd.Categorical(
+                        loyalty_distribution['Loyalty Type'],
+                        categories=loyalty_order,
+                        ordered=True
+                    )
+                    loyalty_distribution = loyalty_distribution.sort_values('Loyalty Type')
+
+                    col1, col2 = st.columns([2, 1])
+
+                    with col1:
+                        # Loyalty pie chart
+                        fig_loyalty = px.pie(
+                            loyalty_distribution,
+                            values='Customers',
+                            names='Loyalty Type',
+                            title='Location Loyalty Among Recurring Customers',
+                            hole=0.4
+                        )
+
+                        fig_loyalty.update_layout(height=400)
+                        st.plotly_chart(fig_loyalty, use_container_width=True)
+
+                    with col2:
+                        st.dataframe(loyalty_distribution, use_container_width=True, hide_index=True)
+
+                    # Recurring customers per location
+                    st.markdown("#### Recurring Customers by Location")
+
+                    location_recurring = recurring_customer_data.groupby('location')['email'].nunique().reset_index()
+                    location_recurring.columns = ['Location', 'Recurring Customers']
+                    location_recurring = location_recurring.sort_values('Recurring Customers', ascending=False)
+
+                    st.dataframe(location_recurring, use_container_width=True, hide_index=True)
+
+                # Insights
+                st.info("""
+                **Understanding Customer Tiers:**
+                - **One-time**: Customers who have made only 1 booking (potential for conversion)
+                - **Light (2-3 bookings)**: Customers returning occasionally
+                - **Regular (4-6 bookings)**: Customers with established booking patterns
+                - **Frequent (7-10 bookings)**: Loyal customers who visit regularly
+                - **VIP (11+ bookings)**: Your most loyal customer base
+
+                **Location Loyalty Insights:**
+                - **Single location**: Brand loyal to specific location (consider location-specific retention programs)
+                - **2 locations**: Cross-location customers (appreciate variety)
+                - **3+ locations**: True Kuuma fans exploring all offerings
+
+                **Strategic Actions:**
+                - Target one-time customers with re-engagement campaigns
+                - Reward VIP and Frequent tiers with loyalty benefits
+                - Encourage single-location customers to try other branches
+                """)
 
             # Export functionality
             st.sidebar.markdown("---")
