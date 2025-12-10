@@ -214,8 +214,9 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
                 temp_values = data['daily']['temperature_2m_mean']
                 temp_df = pd.DataFrame({'date': temp_dates, 'temperature': temp_values})
                 return temp_df
-        except Exception as e:
-            st.info(f"Open-Meteo unavailable, trying backup source... ({str(e)})")
+        except Exception:
+            # Silently try fallback
+            pass
 
         # Fallback to Meteostat
         try:
@@ -236,8 +237,8 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
                 # Remove NaN temperatures
                 temp_df = temp_df.dropna(subset=['temperature'])
                 return temp_df
-        except Exception as e:
-            st.warning(f"Could not fetch temperature data from any source: {str(e)}")
+        except Exception:
+            # Silently fail
             return None
 
         return None
@@ -478,22 +479,22 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
 
             # Temperature Analysis
             if show_temperature:
-                st.markdown("---")
-                st.markdown("### Temperature & Booking Behavior Analysis")
-
-                st.markdown("""
-                This analysis shows how weather conditions at the time of booking affect customer behavior.
-
-                **Key insights:**
-                - Does cold weather drive more sauna bookings?
-                - Do customers book further in advance during certain temperatures?
-                - Which temperature ranges have the highest booking volume?
-                """)
-
                 with st.spinner("Fetching temperature data..."):
                     data_with_temp = add_temperature_to_bookings(filtered_data)
 
+                # Only show the section if we successfully got temperature data
                 if 'temperature' in data_with_temp.columns and data_with_temp['temperature'].notna().any():
+                    st.markdown("---")
+                    st.markdown("### Temperature & Booking Behavior Analysis")
+
+                    st.markdown("""
+                    This analysis shows how weather conditions at the time of booking affect customer behavior.
+
+                    **Key insights:**
+                    - Does cold weather drive more sauna bookings?
+                    - Do customers book further in advance during certain temperatures?
+                    - Which temperature ranges have the highest booking volume?
+                    """)
                     # Temperature vs Lead Time
                     temp_analysis = data_with_temp.groupby('temp_category', observed=True).agg({
                         'interval_days': 'mean',
@@ -591,8 +592,6 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
                     - **High bookings + long lead time**: Customers plan ahead for sauna visits in this weather
                     - **Low bookings**: This temperature range sees less sauna demand
                     """)
-                else:
-                    st.warning("Temperature data could not be retrieved. Please check your internet connection and try again.")
 
             # Export functionality
             st.sidebar.markdown("---")
