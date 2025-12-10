@@ -905,15 +905,17 @@ Use this heatmap to optimize your team schedule - ensure adequate coverage durin
                     location_stats['Recurring Rate (%)'] = (location_stats['Recurring Customers'] / location_stats['Total Customers'] * 100).round(1)
 
                     # Keep only the columns we want to display
-                    location_display = location_stats[['Location', 'Recurring Customers', 'Recurring Rate (%)']].copy()
+                    location_display = location_stats[['Location', 'Total Customers', 'Recurring Customers', 'Recurring Rate (%)']].copy()
                     location_display = location_display.sort_values('Recurring Customers', ascending=False)
 
-                    # Add total row with average recurring rate
+                    # Add total row with sums and average recurring rate
+                    total_customers = location_display['Total Customers'].sum()
                     total_recurring = location_display['Recurring Customers'].sum()
                     avg_recurring_rate = location_stats['Recurring Rate (%)'].mean().round(1)
 
                     total_row = pd.DataFrame({
                         'Location': ['Total'],
+                        'Total Customers': [total_customers],
                         'Recurring Customers': [total_recurring],
                         'Recurring Rate (%)': [avg_recurring_rate]
                     })
