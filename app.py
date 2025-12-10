@@ -89,7 +89,13 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
     default_id_col = "Booking number" if "Booking number" in df1.columns else df1.columns[0]
     default_created_col = "Created" if "Created" in df1.columns else df1.columns[0]
     default_start_col = "Start" if "Start" in df2.columns else df2.columns[0]
-    default_location_col = "Activity" if "Activity" in df1.columns else None
+    # Check for Tour or Activity as location column
+    if "Tour" in df1.columns:
+        default_location_col = "Tour"
+    elif "Activity" in df1.columns:
+        default_location_col = "Activity"
+    else:
+        default_location_col = None
 
     # Booking ID columns
     id_col_1 = st.sidebar.selectbox(
