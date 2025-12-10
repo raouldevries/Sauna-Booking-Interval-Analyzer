@@ -461,9 +461,18 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
                 st.markdown("### Breakdown by Location")
 
                 st.markdown("""
-                Compare booking behavior across different locations. **Average** shows all bookings (sensitive to advance planners),
-                while **Median** shows what a typical customer does (not affected by outliers). A large gap between them indicates
-                mixed booking patterns: mostly last-minute with some advance planners.
+                Compare booking behavior across different locations.
+
+                **Understanding Average vs Median:**
+                - **Average** - Includes all bookings, including customers who book far in advance (e.g., 30 days ahead)
+                - **Median** - Shows what a typical customer actually does, ignoring extreme values
+
+                **Example:** If most customers book 0-2 days ahead, but a few book 30 days ahead:
+                - Average might be 5 days (pulled up by advance planners)
+                - Median would be 1 day (the typical customer)
+
+                **What to look for:** A large gap between Average and Median means you have mostly last-minute bookers
+                with some advance planners. A small gap means consistent booking behavior.
                 """)
 
                 location_stats = filtered_data.groupby('location').agg({
