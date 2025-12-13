@@ -40,8 +40,6 @@ st.markdown("Revenue trends, promotion effectiveness, and customer lifetime valu
 # Initialize session state
 if 'df1' not in st.session_state:
     st.session_state.df1 = None
-if 'df2' not in st.session_state:
-    st.session_state.df2 = None
 
 # Parse uploaded files
 @st.cache_data
@@ -63,41 +61,25 @@ nav_container = st.sidebar.container()
 # Sidebar - Upload section
 st.sidebar.header("Upload & Configure")
 
-# File uploaders
+# File uploader - only need Booking Creation Dates for this page
 uploaded_file1 = st.sidebar.file_uploader(
     "Booking Creation Dates (.xls/.xlsx)",
     type=["xls", "xlsx"],
-    help="Upload the file containing when bookings were created",
+    help="Upload the file containing booking data with revenue information",
     key="rev_file1"
 )
 
-uploaded_file2 = st.sidebar.file_uploader(
-    "Visit Dates (.xls/.xlsx)",
-    type=["xls", "xlsx"],
-    help="Upload the file containing when customers actually visited",
-    key="rev_file2"
-)
-
-# Load File 1
+# Load File
 if uploaded_file1 is not None:
     df1, error1 = load_excel_file(uploaded_file1)
     if error1:
-        st.sidebar.error(f"Error reading File 1: {error1}")
+        st.sidebar.error(f"Error reading file: {error1}")
     else:
         st.session_state.df1 = df1
-        st.sidebar.success(f"File 1 loaded: {len(df1):,} rows")
+        st.sidebar.success(f"File loaded: {len(df1):,} rows")
 
-# Load File 2
-if uploaded_file2 is not None:
-    df2, error2 = load_excel_file(uploaded_file2)
-    if error2:
-        st.sidebar.error(f"Error reading File 2: {error2}")
-    else:
-        st.session_state.df2 = df2
-        st.sidebar.success(f"File 2 loaded: {len(df2):,} rows")
-
-# Fill navigation container (now that files are loaded)
-if st.session_state.df1 is not None and st.session_state.df2 is not None:
+# Fill navigation container (now that file is loaded)
+if st.session_state.df1 is not None:
     with nav_container:
         st.markdown("### Navigation")
         st.page_link("app.py", label="Booking Patterns", icon=":material/bar_chart:")
@@ -107,18 +89,16 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
         st.markdown("---")
 
 # Main content
-if st.session_state.df1 is None or st.session_state.df2 is None:
-    st.info("**No data loaded.** Please upload your Excel files using the sidebar to begin analysis.")
+if st.session_state.df1 is None:
+    st.info("**No data loaded.** Please upload your Booking Creation Dates file using the sidebar to begin analysis.")
     st.markdown("""
     ### Getting Started
     1. Upload your booking creation dates file
-    2. Upload your visit dates file
-    3. Configure column mappings
-    4. Explore revenue insights!
+    2. Configure column mappings
+    3. Explore revenue insights!
     """)
 else:
     df1 = st.session_state.df1
-    df2 = st.session_state.df2
 
     # Column mapping
     st.sidebar.markdown("---")
@@ -127,7 +107,6 @@ else:
     # Smart defaults
     default_id_col = "Booking number" if "Booking number" in df1.columns else df1.columns[0]
     default_created_col = "Created" if "Created" in df1.columns else df1.columns[0]
-    default_start_col = "Start" if "Start" in df2.columns else df2.columns[0]
 
     if "Tour" in df1.columns:
         default_location_col = "Tour"
@@ -136,32 +115,18 @@ else:
     else:
         default_location_col = None
 
-    id_col_1 = st.sidebar.selectbox(
-        "Booking ID (File 1)",
+    id_col = st.sidebar.selectbox(
+        "Booking ID",
         options=df1.columns.tolist(),
         index=df1.columns.tolist().index(default_id_col) if default_id_col in df1.columns else 0,
-        key="rev_id_col_1"
+        key="rev_id_col"
     )
 
-    date_col_1 = st.sidebar.selectbox(
-        "Booking Creation Date (File 1)",
+    date_col = st.sidebar.selectbox(
+        "Booking Date",
         options=df1.columns.tolist(),
         index=df1.columns.tolist().index(default_created_col) if default_created_col in df1.columns else 0,
-        key="rev_date_col_1"
-    )
-
-    id_col_2 = st.sidebar.selectbox(
-        "Booking ID (File 2)",
-        options=df2.columns.tolist(),
-        index=df2.columns.tolist().index(default_id_col) if default_id_col in df2.columns else 0,
-        key="rev_id_col_2"
-    )
-
-    visit_col_2 = st.sidebar.selectbox(
-        "Visit Date (File 2)",
-        options=df2.columns.tolist(),
-        index=df2.columns.tolist().index(default_start_col) if default_start_col in df2.columns else 0,
-        key="rev_visit_col_2"
+        key="rev_date_col"
     )
 
     # Location column (optional)
@@ -209,49 +174,36 @@ else:
         To use revenue analysis, please select a Revenue Column in the sidebar (e.g., "Total gross").
         """)
     else:
-        # Process data
+        # Process data directly from Booking Creation Dates file
         @st.cache_data
-        def process_revenue_data(df1, df2, id_col_1, date_col_1, id_col_2, visit_col_2,
-                                  location_col, revenue_col, email_col):
-            # Prepare dataframes
-            cols_to_use = [id_col_1, date_col_1]
-            df1_prep = df1[cols_to_use].copy()
-            df1_prep.columns = ['booking_id', 'booking_date']
-
-            df2_prep = df2[[id_col_2, visit_col_2]].copy()
-            df2_prep.columns = ['booking_id', 'visit_date']
+        def process_revenue_data(df1, id_col, date_col, location_col, revenue_col, email_col):
+            # Prepare dataframe
+            data = pd.DataFrame()
+            data['booking_id'] = df1[id_col]
+            data['booking_date'] = pd.to_datetime(df1[date_col], errors='coerce')
 
             # Add optional columns
             if location_col != "None":
-                df1_prep['location'] = df1[location_col].values
+                data['location'] = df1[location_col].values
 
             if revenue_col != "None":
-                df1_prep['revenue'] = pd.to_numeric(df1[revenue_col], errors='coerce').fillna(0)
+                data['revenue'] = pd.to_numeric(df1[revenue_col], errors='coerce').fillna(0)
 
             if email_col != "None":
-                df1_prep['email'] = df1[email_col].values
-
-            # Merge on booking ID
-            merged = df1_prep.merge(df2_prep, on='booking_id', how='inner')
-
-            # Convert dates
-            merged['booking_date'] = pd.to_datetime(merged['booking_date'], errors='coerce')
-            merged['visit_date'] = pd.to_datetime(merged['visit_date'], errors='coerce')
+                data['email'] = df1[email_col].values
 
             # Filter invalid records
-            invalid_dates = merged['booking_date'].isna() | merged['visit_date'].isna()
-            merged_clean = merged[~invalid_dates].copy()
+            data_clean = data[data['booking_date'].notna()].copy()
 
-            return merged_clean
+            return data_clean
 
         with st.spinner("Processing data..."):
             processed_data = process_revenue_data(
-                df1, df2, id_col_1, date_col_1, id_col_2, visit_col_2,
-                location_col, revenue_col, email_col
+                df1, id_col, date_col, location_col, revenue_col, email_col
             )
 
         if len(processed_data) == 0:
-            st.error("No matching booking IDs found between files.")
+            st.error("No valid booking data found.")
         else:
             # ==================== REVENUE ANALYSIS ====================
             st.markdown("### Revenue Analysis")
@@ -891,5 +843,4 @@ else:
     st.sidebar.markdown("---")
     if st.sidebar.button("Clear All & Start Over", key="rev_reset"):
         st.session_state.df1 = None
-        st.session_state.df2 = None
         st.rerun()
