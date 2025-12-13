@@ -5,7 +5,6 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import requests
 import numpy as np
-from auth import check_password, logout_button
 
 # Page configuration
 st.set_page_config(
@@ -13,10 +12,6 @@ st.set_page_config(
     page_icon="🔥",
     layout="wide"
 )
-
-# Authentication check - must be before any content
-if not check_password():
-    st.stop()
 
 # Hide default Streamlit navigation
 hide_default_nav = """
@@ -27,9 +22,6 @@ hide_default_nav = """
 </style>
 """
 st.markdown(hide_default_nav, unsafe_allow_html=True)
-
-# Logout button in sidebar
-logout_button()
 
 # Header with logo
 col1, col2 = st.columns([1, 5])
