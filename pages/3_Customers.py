@@ -1,0 +1,428 @@
+"""
+Kuuma Booking Analyzer - Customers Page
+Recurring customer analysis, tiers, and loyalty
+"""
+
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+from datetime import datetime
+import sys
+sys.path.insert(0, '..')
+from auth import check_password, logout_button
+
+# Page configuration
+st.set_page_config(
+    page_title="Kuuma - Customers",
+    page_icon="🔥",
+    layout="wide"
+)
+
+# Authentication check - must be before any content
+if not check_password():
+    st.stop()
+
+# Hide default Streamlit navigation
+hide_default_nav = """
+<style>
+[data-testid="stSidebarNav"] {
+    display: none;
+}
+</style>
+"""
+st.markdown(hide_default_nav, unsafe_allow_html=True)
+
+# Logout button in sidebar
+logout_button()
+
+# Header with logo
+col1, col2 = st.columns([1, 5])
+with col1:
+    st.image("https://kuuma.nl/wp-content/themes/kuuma/images/logo.svg", width=120)
+with col2:
+    st.title("Kuuma Booking Analyzer")
+    st.markdown("**Customer insights & booking intelligence**")
+
+st.markdown("## Recurring Customer Analysis")
+st.markdown("Customer segmentation, loyalty tiers, and retention insights")
+
+# Initialize session state
+if 'df1' not in st.session_state:
+    st.session_state.df1 = None
+if 'df2' not in st.session_state:
+    st.session_state.df2 = None
+
+# Parse uploaded files
+@st.cache_data
+def load_excel_file(uploaded_file):
+    try:
+        file_name = uploaded_file.name
+        if file_name.endswith('.xls'):
+            engine = 'xlrd'
+        else:
+            engine = 'openpyxl'
+        df = pd.read_excel(uploaded_file, engine=engine)
+        return df, None
+    except Exception as e:
+        return None, str(e)
+
+# Reserve container for navigation at top of sidebar
+nav_container = st.sidebar.container()
+
+# Sidebar - Upload section
+st.sidebar.header("Upload & Configure")
+
+# File uploaders
+uploaded_file1 = st.sidebar.file_uploader(
+    "Booking Creation Dates (.xls/.xlsx)",
+    type=["xls", "xlsx"],
+    help="Upload the file containing when bookings were created",
+    key="cust_file1"
+)
+
+uploaded_file2 = st.sidebar.file_uploader(
+    "Visit Dates (.xls/.xlsx)",
+    type=["xls", "xlsx"],
+    help="Upload the file containing when customers actually visited",
+    key="cust_file2"
+)
+
+# Load File 1
+if uploaded_file1 is not None:
+    df1, error1 = load_excel_file(uploaded_file1)
+    if error1:
+        st.sidebar.error(f"Error reading File 1: {error1}")
+    else:
+        st.session_state.df1 = df1
+        st.sidebar.success(f"File 1 loaded: {len(df1):,} rows")
+
+# Load File 2
+if uploaded_file2 is not None:
+    df2, error2 = load_excel_file(uploaded_file2)
+    if error2:
+        st.sidebar.error(f"Error reading File 2: {error2}")
+    else:
+        st.session_state.df2 = df2
+        st.sidebar.success(f"File 2 loaded: {len(df2):,} rows")
+
+# Fill navigation container (now that files are loaded)
+if st.session_state.df1 is not None and st.session_state.df2 is not None:
+    with nav_container:
+        st.markdown("### Navigation")
+        st.page_link("app.py", label="Booking Patterns", icon=":material/bar_chart:")
+        st.page_link("pages/3_Customers.py", label="Recurring Customers", icon=":material/group:")
+        st.page_link("pages/4_Revenue.py", label="Revenue & Value", icon=":material/payments:")
+        st.page_link("pages/5_Promotions.py", label="Promotions", icon=":material/sell:")
+        st.markdown("---")
+
+# Main content
+if st.session_state.df1 is None or st.session_state.df2 is None:
+    st.info("**No data loaded.** Please upload your Excel files using the sidebar to begin analysis.")
+    st.markdown("""
+    ### Getting Started
+    1. Upload your booking creation dates file
+    2. Upload your visit dates file
+    3. Configure column mappings
+    4. Explore customer insights!
+    """)
+else:
+    df1 = st.session_state.df1
+    df2 = st.session_state.df2
+
+    # Column mapping
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Column Mapping")
+
+    # Smart defaults
+    default_id_col = "Booking number" if "Booking number" in df1.columns else df1.columns[0]
+    if "Tour" in df1.columns:
+        default_location_col = "Tour"
+    elif "Activity" in df1.columns:
+        default_location_col = "Activity"
+    else:
+        default_location_col = None
+
+    id_col_1 = st.sidebar.selectbox(
+        "Booking ID (File 1)",
+        options=df1.columns.tolist(),
+        index=df1.columns.tolist().index(default_id_col) if default_id_col in df1.columns else 0,
+        key="cust_id_col_1"
+    )
+
+    # Location column (optional)
+    location_options = ["None"] + df1.columns.tolist()
+    location_default_index = location_options.index(default_location_col) if default_location_col in location_options else 0
+
+    location_col = st.sidebar.selectbox(
+        "Location (optional)",
+        options=location_options,
+        index=location_default_index,
+        key="cust_location_col"
+    )
+
+    # Email column (required for this page)
+    default_email_col = "Email address" if "Email address" in df1.columns else None
+    email_options = ["None"] + df1.columns.tolist()
+    email_default_index = email_options.index(default_email_col) if default_email_col in email_options else 0
+
+    email_col = st.sidebar.selectbox(
+        "Email Address",
+        options=email_options,
+        index=email_default_index,
+        help="Required for customer analysis",
+        key="cust_email_col"
+    )
+
+    # Check if email column is configured
+    if email_col == "None":
+        st.warning("""
+        **Email column not configured.**
+
+        To use customer analysis, please select an Email Address column in the sidebar.
+        This allows us to identify unique customers and track recurring visits.
+        """)
+    else:
+        # Prepare customer data
+        customer_data = df1[[id_col_1, email_col]].copy()
+        customer_data.columns = ['booking_id', 'email']
+
+        # Add location if available
+        if location_col != "None":
+            customer_data['location'] = df1[location_col]
+
+        # Remove rows with missing emails
+        customer_data = customer_data[customer_data['email'].notna() & (customer_data['email'] != '')]
+
+        if len(customer_data) == 0:
+            st.warning("No valid email addresses found in the data.")
+        else:
+            # Count bookings per customer
+            customer_frequency = customer_data.groupby('email').agg({
+                'booking_id': 'count'
+            }).reset_index()
+            customer_frequency.columns = ['email', 'bookings']
+
+            # Categorize into tiers
+            def categorize_customer(bookings):
+                if bookings == 1:
+                    return "One-time"
+                elif 2 <= bookings <= 3:
+                    return "Light (2-3)"
+                elif 4 <= bookings <= 6:
+                    return "Regular (4-6)"
+                elif 7 <= bookings <= 10:
+                    return "Frequent (7-10)"
+                else:
+                    return "VIP (11+)"
+
+            customer_frequency['tier'] = customer_frequency['bookings'].apply(categorize_customer)
+
+            # Tier order for consistent display
+            tier_order = ['One-time', 'Light (2-3)', 'Regular (4-6)', 'Frequent (7-10)', 'VIP (11+)']
+            customer_frequency['tier'] = pd.Categorical(customer_frequency['tier'], categories=tier_order, ordered=True)
+
+            # Customer tier distribution
+            tier_distribution = customer_frequency['tier'].value_counts().reindex(tier_order, fill_value=0).reset_index()
+            tier_distribution.columns = ['Tier', 'Customers']
+
+            # Calculate metrics
+            total_customers = len(customer_frequency)
+            recurring_customers = len(customer_frequency[customer_frequency['bookings'] > 1])
+            recurring_pct = (recurring_customers / total_customers * 100) if total_customers > 0 else 0
+
+            # Calculate percentage of total for each tier
+            tier_distribution['Percentage'] = (tier_distribution['Customers'] / total_customers * 100).round(1)
+            tier_distribution['label'] = tier_distribution['Percentage'].apply(lambda x: f"{x}%")
+
+            # Display key metrics
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric(
+                    "Total Unique Customers",
+                    f"{total_customers:,}",
+                    help="Number of unique email addresses in the dataset."
+                )
+            with col2:
+                st.metric(
+                    "Recurring Customers",
+                    f"{recurring_customers:,}",
+                    help="Customers who have made more than one booking."
+                )
+            with col3:
+                st.metric(
+                    "Recurring Rate",
+                    f"{recurring_pct:.1f}%",
+                    help="Percentage of customers who returned for at least one more booking."
+                )
+
+            # Customer tier chart
+            st.markdown("### Customer Tier Distribution")
+
+            fig_tiers = px.bar(
+                tier_distribution,
+                x='Tier',
+                y='Percentage',
+                title='Customer Distribution by Tier',
+                labels={'Tier': 'Customer Tier', 'Percentage': 'Percentage of Total Customers'},
+                text='label'
+            )
+
+            fig_tiers.update_traces(
+                marker_color='#1f77b4',
+                textposition='outside'
+            )
+
+            fig_tiers.update_layout(
+                height=500,
+                showlegend=False,
+                xaxis=dict(tickangle=0),
+                yaxis=dict(range=[0, 100])
+            )
+
+            st.plotly_chart(fig_tiers, use_container_width=True)
+
+            # Location loyalty analysis (only if location is selected)
+            if location_col != "None":
+                st.markdown("---")
+                st.markdown("### Location Loyalty Among Recurring Customers")
+
+                # For recurring customers, count how many locations they visit
+                recurring_customer_data = customer_data[customer_data['email'].isin(
+                    customer_frequency[customer_frequency['bookings'] > 1]['email']
+                )]
+
+                locations_per_customer = recurring_customer_data.groupby('email')['location'].nunique().reset_index()
+                locations_per_customer.columns = ['email', 'locations_visited']
+
+                # Categorize loyalty
+                def categorize_loyalty(num_locations):
+                    if num_locations == 1:
+                        return "Single location"
+                    elif num_locations == 2:
+                        return "2 locations"
+                    else:
+                        return "3+ locations"
+
+                locations_per_customer['loyalty_type'] = locations_per_customer['locations_visited'].apply(categorize_loyalty)
+
+                loyalty_distribution = locations_per_customer['loyalty_type'].value_counts().reset_index()
+                loyalty_distribution.columns = ['Loyalty Type', 'Customers']
+
+                # Reorder for consistent display
+                loyalty_order = ['Single location', '2 locations', '3+ locations']
+                loyalty_distribution['Loyalty Type'] = pd.Categorical(
+                    loyalty_distribution['Loyalty Type'],
+                    categories=loyalty_order,
+                    ordered=True
+                )
+                loyalty_distribution = loyalty_distribution.sort_values('Loyalty Type')
+
+                # Side-by-side layout
+                col1, col2 = st.columns([3, 2])
+
+                with col1:
+                    fig_loyalty = px.pie(
+                        loyalty_distribution,
+                        values='Customers',
+                        names='Loyalty Type',
+                        hole=0.4
+                    )
+
+                    fig_loyalty.update_layout(
+                        height=400,
+                        showlegend=True,
+                        legend=dict(
+                            orientation="h",
+                            yanchor="bottom",
+                            y=-0.2,
+                            xanchor="center",
+                            x=0.5
+                        ),
+                        margin=dict(t=20, b=80)
+                    )
+                    st.plotly_chart(fig_loyalty, use_container_width=True)
+
+                with col2:
+                    st.dataframe(loyalty_distribution, use_container_width=True, hide_index=True)
+
+                # Recurring customers per location
+                st.markdown("### Recurring Customers by Location")
+
+                location_total = customer_data.groupby('location')['email'].nunique().reset_index()
+                location_total.columns = ['Location', 'Total Customers']
+
+                location_recurring = recurring_customer_data.groupby('location')['email'].nunique().reset_index()
+                location_recurring.columns = ['Location', 'Recurring Customers']
+
+                location_stats = location_total.merge(location_recurring, on='Location')
+                location_stats['Recurring Rate (%)'] = (location_stats['Recurring Customers'] / location_stats['Total Customers'] * 100).round(1)
+
+                location_display = location_stats[['Location', 'Total Customers', 'Recurring Customers', 'Recurring Rate (%)']].copy()
+                location_display = location_display.sort_values('Recurring Customers', ascending=False)
+
+                # Add total row
+                total_cust = location_display['Total Customers'].sum()
+                total_rec = location_display['Recurring Customers'].sum()
+                avg_rate = location_stats['Recurring Rate (%)'].mean().round(1)
+
+                total_row = pd.DataFrame({
+                    'Location': ['Total'],
+                    'Total Customers': [total_cust],
+                    'Recurring Customers': [total_rec],
+                    'Recurring Rate (%)': [avg_rate]
+                })
+                location_display = pd.concat([location_display, total_row], ignore_index=True)
+
+                st.dataframe(location_display, use_container_width=True, hide_index=True)
+
+                # Explanation
+                global_total = len(customer_frequency)
+                global_recurring = len(customer_frequency[customer_frequency['bookings'] > 1])
+                global_rate = (global_recurring / global_total * 100) if global_total > 0 else 0
+
+                with st.expander("Why is the recurring rate different from the top metrics?"):
+                    st.markdown(f"""
+**Top Metrics (Global View):** {global_rate:.1f}% recurring rate
+- Counts each customer once across all locations
+- Example: If Sarah visits Matsu and Noord, she counts as 1 total customer
+
+**Location Table (Location View):** {avg_rate:.1f}% average recurring rate
+- Counts each customer once per location they visit
+- Example: If Sarah visits Matsu and Noord, she counts as 1 customer at Matsu + 1 customer at Noord
+
+**Why the difference?**
+- Total Customers in table: {total_cust:,} (sum per location)
+- Total Unique Customers (top): {global_total:,} (unique people)
+- Difference: {total_cust - global_total:,} extra counts from customers visiting multiple locations
+
+This is actually good news - it means your recurring customers are loyal across multiple locations!
+                    """)
+
+            # Insights
+            st.markdown("---")
+            st.info("""
+**Understanding Customer Tiers:**
+- **One-time**: Customers who have made only 1 booking (potential for conversion)
+- **Light (2-3 bookings)**: Customers returning occasionally
+- **Regular (4-6 bookings)**: Customers with established booking patterns
+- **Frequent (7-10 bookings)**: Loyal customers who visit regularly
+- **VIP (11+ bookings)**: Your most loyal customer base
+
+**Location Loyalty Insights:**
+- **Single location**: Brand loyal to specific location (consider location-specific retention programs)
+- **2 locations**: Cross-location customers (appreciate variety)
+- **3+ locations**: True Kuuma fans exploring all offerings
+
+**Strategic Actions:**
+- Target one-time customers with re-engagement campaigns
+- Reward VIP and Frequent tiers with loyalty benefits
+- Encourage single-location customers to try other branches
+            """)
+
+    # Reset button
+    st.sidebar.markdown("---")
+    if st.sidebar.button("Clear All & Start Over", key="cust_reset"):
+        st.session_state.df1 = None
+        st.session_state.df2 = None
+        st.rerun()

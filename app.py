@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import requests
 import numpy as np
+from auth import check_password, logout_button
 
 # Page configuration
 st.set_page_config(
@@ -13,6 +14,23 @@ st.set_page_config(
     layout="wide"
 )
 
+# Authentication check - must be before any content
+if not check_password():
+    st.stop()
+
+# Hide default Streamlit navigation
+hide_default_nav = """
+<style>
+[data-testid="stSidebarNav"] {
+    display: none;
+}
+</style>
+"""
+st.markdown(hide_default_nav, unsafe_allow_html=True)
+
+# Logout button in sidebar
+logout_button()
+
 # Header with logo
 col1, col2 = st.columns([1, 5])
 with col1:
@@ -20,22 +38,6 @@ with col1:
 with col2:
     st.title("Kuuma Booking Analyzer")
     st.markdown("**Customer insights & booking intelligence**")
-
-# Sidebar
-st.sidebar.header("Upload & Configure")
-
-# File uploaders
-uploaded_file1 = st.sidebar.file_uploader(
-    "Booking Creation Dates (.xls/.xlsx)",
-    type=["xls", "xlsx"],
-    help="Upload the file containing when bookings were created"
-)
-
-uploaded_file2 = st.sidebar.file_uploader(
-    "Visit Dates (.xls/.xlsx)",
-    type=["xls", "xlsx"],
-    help="Upload the file containing when customers actually visited"
-)
 
 # Initialize session state
 if 'df1' not in st.session_state:
@@ -59,6 +61,25 @@ def load_excel_file(uploaded_file):
     except Exception as e:
         return None, str(e)
 
+# Reserve container for navigation at top of sidebar
+nav_container = st.sidebar.container()
+
+# Sidebar - Upload section
+st.sidebar.header("Upload & Configure")
+
+# File uploaders
+uploaded_file1 = st.sidebar.file_uploader(
+    "Booking Creation Dates (.xls/.xlsx)",
+    type=["xls", "xlsx"],
+    help="Upload the file containing when bookings were created"
+)
+
+uploaded_file2 = st.sidebar.file_uploader(
+    "Visit Dates (.xls/.xlsx)",
+    type=["xls", "xlsx"],
+    help="Upload the file containing when customers actually visited"
+)
+
 # Load File 1
 if uploaded_file1 is not None:
     df1, error1 = load_excel_file(uploaded_file1)
@@ -76,6 +97,16 @@ if uploaded_file2 is not None:
     else:
         st.session_state.df2 = df2
         st.sidebar.success(f"File 2 loaded: {len(df2):,} rows")
+
+# Fill navigation container (now that files are loaded)
+if st.session_state.df1 is not None and st.session_state.df2 is not None:
+    with nav_container:
+        st.markdown("### Navigation")
+        st.page_link("app.py", label="Booking Patterns", icon=":material/bar_chart:")
+        st.page_link("pages/3_Customers.py", label="Recurring Customers", icon=":material/group:")
+        st.page_link("pages/4_Revenue.py", label="Revenue & Value", icon=":material/payments:")
+        st.page_link("pages/5_Promotions.py", label="Promotions", icon=":material/sell:")
+        st.markdown("---")
 
 # Column mapping section
 if st.session_state.df1 is not None and st.session_state.df2 is not None:
@@ -388,16 +419,32 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
             col1, col2, col3, col4 = st.columns(4)
 
             with col1:
-                st.metric("Average Lead Time", f"{avg_interval:.1f} days")
+                st.metric(
+                    "Average Lead Time",
+                    f"{avg_interval:.1f} days",
+                    help="Mean number of days between booking creation and visit date."
+                )
 
             with col2:
-                st.metric("Median Lead Time", f"{median_interval:.1f} days")
+                st.metric(
+                    "Median Lead Time",
+                    f"{median_interval:.1f} days",
+                    help="Middle value of lead times. Less affected by outliers than average."
+                )
 
             with col3:
-                st.metric("Total Bookings", f"{total_bookings:,}")
+                st.metric(
+                    "Total Bookings",
+                    f"{total_bookings:,}",
+                    help="Total number of successfully matched bookings in the dataset."
+                )
 
             with col4:
-                st.metric("Same-Day Bookings", f"{same_day_pct:.1f}%")
+                st.metric(
+                    "Same-Day Bookings",
+                    f"{same_day_pct:.1f}%",
+                    help="Percentage of bookings made on the same day as the visit."
+                )
 
             # Data quality summary
             st.info(f"**Data Quality:** {len(processed_data):,} matched records | "
@@ -737,246 +784,6 @@ Use this heatmap to optimize your team schedule - ensure adequate coverage durin
                     - **Small bubbles**: Temperature ranges with less sauna demand
                     """)
 
-            # Recurring Customer Analysis
-            if email_col != "None":
-                st.markdown("---")
-                st.markdown("### Recurring Customer Analysis")
-
-                st.markdown("""
-                Analyze customer loyalty and repeat visit patterns using email addresses.
-                Understand which customers return and how frequently they book.
-                """)
-
-                # Prepare customer data
-                customer_data = df1[[id_col_1, email_col]].copy()
-                customer_data.columns = ['booking_id', 'email']
-
-                # Add location if available
-                if location_col != "None":
-                    customer_data['location'] = df1[location_col]
-
-                # Remove rows with missing emails
-                customer_data = customer_data[customer_data['email'].notna() & (customer_data['email'] != '')]
-
-                # Count bookings per customer
-                customer_frequency = customer_data.groupby('email').agg({
-                    'booking_id': 'count'
-                }).reset_index()
-                customer_frequency.columns = ['email', 'bookings']
-
-                # Categorize into tiers
-                def categorize_customer(bookings):
-                    if bookings == 1:
-                        return "One-time"
-                    elif 2 <= bookings <= 3:
-                        return "Light (2-3)"
-                    elif 4 <= bookings <= 6:
-                        return "Regular (4-6)"
-                    elif 7 <= bookings <= 10:
-                        return "Frequent (7-10)"
-                    else:
-                        return "VIP (11+)"
-
-                customer_frequency['tier'] = customer_frequency['bookings'].apply(categorize_customer)
-
-                # Tier order for consistent display
-                tier_order = ['One-time', 'Light (2-3)', 'Regular (4-6)', 'Frequent (7-10)', 'VIP (11+)']
-                customer_frequency['tier'] = pd.Categorical(customer_frequency['tier'], categories=tier_order, ordered=True)
-
-                # Customer tier distribution
-                tier_distribution = customer_frequency['tier'].value_counts().reindex(tier_order, fill_value=0).reset_index()
-                tier_distribution.columns = ['Tier', 'Customers']
-
-                # Calculate metrics
-                total_customers = len(customer_frequency)
-                recurring_customers = len(customer_frequency[customer_frequency['bookings'] > 1])
-                recurring_pct = (recurring_customers / total_customers * 100) if total_customers > 0 else 0
-
-                # Calculate percentage of total for each tier
-                tier_distribution['Percentage'] = (tier_distribution['Customers'] / total_customers * 100).round(1)
-
-                # Create text labels with percentage
-                tier_distribution['label'] = tier_distribution['Percentage'].apply(lambda x: f"{x}%")
-
-                # Display key metrics
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Total Unique Customers", f"{total_customers:,}")
-                with col2:
-                    st.metric("Recurring Customers", f"{recurring_customers:,}")
-                with col3:
-                    st.metric("Recurring Rate", f"{recurring_pct:.1f}%")
-
-                # Customer tier chart
-                fig_tiers = px.bar(
-                    tier_distribution,
-                    x='Tier',
-                    y='Percentage',
-                    title='Customer Distribution by Tier',
-                    labels={'Tier': 'Customer Tier', 'Percentage': 'Percentage of Total Customers'},
-                    text='label'
-                )
-
-                fig_tiers.update_traces(
-                    marker_color='#1f77b4',
-                    textposition='outside'
-                )
-
-                fig_tiers.update_layout(
-                    height=500,
-                    showlegend=False,
-                    xaxis=dict(tickangle=0),
-                    yaxis=dict(range=[0, 100])
-                )
-
-                st.plotly_chart(fig_tiers, use_container_width=True)
-
-                # Location loyalty analysis (only if location is selected)
-                if location_col != "None":
-                    st.markdown("#### Location Loyalty Among Recurring Customers")
-
-                    # For recurring customers, count how many locations they visit
-                    recurring_customer_data = customer_data[customer_data['email'].isin(
-                        customer_frequency[customer_frequency['bookings'] > 1]['email']
-                    )]
-
-                    locations_per_customer = recurring_customer_data.groupby('email')['location'].nunique().reset_index()
-                    locations_per_customer.columns = ['email', 'locations_visited']
-
-                    # Categorize loyalty
-                    def categorize_loyalty(num_locations):
-                        if num_locations == 1:
-                            return "Single location"
-                        elif num_locations == 2:
-                            return "2 locations"
-                        else:
-                            return "3+ locations"
-
-                    locations_per_customer['loyalty_type'] = locations_per_customer['locations_visited'].apply(categorize_loyalty)
-
-                    loyalty_distribution = locations_per_customer['loyalty_type'].value_counts().reset_index()
-                    loyalty_distribution.columns = ['Loyalty Type', 'Customers']
-
-                    # Reorder for consistent display
-                    loyalty_order = ['Single location', '2 locations', '3+ locations']
-                    loyalty_distribution['Loyalty Type'] = pd.Categorical(
-                        loyalty_distribution['Loyalty Type'],
-                        categories=loyalty_order,
-                        ordered=True
-                    )
-                    loyalty_distribution = loyalty_distribution.sort_values('Loyalty Type')
-
-                    # Side-by-side layout: 60% chart, 40% table
-                    col1, col2 = st.columns([3, 2])
-
-                    with col1:
-                        # Loyalty donut chart
-                        fig_loyalty = px.pie(
-                            loyalty_distribution,
-                            values='Customers',
-                            names='Loyalty Type',
-                            hole=0.4
-                        )
-
-                        fig_loyalty.update_layout(
-                            height=400,
-                            showlegend=True,
-                            legend=dict(
-                                orientation="h",
-                                yanchor="bottom",
-                                y=-0.2,
-                                xanchor="center",
-                                x=0.5
-                            ),
-                            margin=dict(t=20, b=80)
-                        )
-                        st.plotly_chart(fig_loyalty, use_container_width=True)
-
-                    with col2:
-                        st.dataframe(loyalty_distribution, use_container_width=True, hide_index=True)
-
-                    # Recurring customers per location
-                    st.markdown("#### Recurring Customers by Location")
-
-                    # Get total customers per location (all customers, not just recurring)
-                    location_total = customer_data.groupby('location')['email'].nunique().reset_index()
-                    location_total.columns = ['Location', 'Total Customers']
-
-                    # Get recurring customers per location
-                    location_recurring = recurring_customer_data.groupby('location')['email'].nunique().reset_index()
-                    location_recurring.columns = ['Location', 'Recurring Customers']
-
-                    # Merge and calculate recurring rate
-                    location_stats = location_total.merge(location_recurring, on='Location')
-                    location_stats['Recurring Rate (%)'] = (location_stats['Recurring Customers'] / location_stats['Total Customers'] * 100).round(1)
-
-                    # Keep only the columns we want to display
-                    location_display = location_stats[['Location', 'Total Customers', 'Recurring Customers', 'Recurring Rate (%)']].copy()
-                    location_display = location_display.sort_values('Recurring Customers', ascending=False)
-
-                    # Add total row with sums and average recurring rate
-                    total_customers = location_display['Total Customers'].sum()
-                    total_recurring = location_display['Recurring Customers'].sum()
-                    avg_recurring_rate = location_stats['Recurring Rate (%)'].mean().round(1)
-
-                    total_row = pd.DataFrame({
-                        'Location': ['Total'],
-                        'Total Customers': [total_customers],
-                        'Recurring Customers': [total_recurring],
-                        'Recurring Rate (%)': [avg_recurring_rate]
-                    })
-                    location_display = pd.concat([location_display, total_row], ignore_index=True)
-
-                    st.dataframe(location_display, use_container_width=True, hide_index=True)
-
-                    # Explanation of location-level vs global recurring rate
-                    global_total = len(customer_frequency)
-                    global_recurring = len(customer_frequency[customer_frequency['bookings'] > 1])
-                    global_rate = (global_recurring / global_total * 100) if global_total > 0 else 0
-
-                    with st.expander("Why is the recurring rate different from the top metrics?"):
-                        st.markdown(f"""
-                        **Top Metrics (Global View):** {global_rate:.1f}% recurring rate
-                        - Counts each customer once across all locations
-                        - Example: If Sarah visits Matsu and Noord, she counts as 1 total customer
-
-                        **Location Table (Location View):** {avg_recurring_rate:.1f}% average recurring rate
-                        - Counts each customer once per location they visit
-                        - Example: If Sarah visits Matsu and Noord, she counts as 1 customer at Matsu + 1 customer at Noord
-
-                        **Why the difference?**
-                        - Total Customers in table: {total_customers:,} (sum per location)
-                        - Total Unique Customers (top): {global_total:,} (unique people)
-                        - Difference: {total_customers - global_total:,} extra counts from customers visiting multiple locations
-
-                        **What this reveals:**
-                        Customers who visit multiple locations are counted at each location, which inflates the location-level totals. This is actually good news - it means your recurring customers are loyal across multiple locations, not just one!
-
-                        **When to use each metric:**
-                        - Use {global_rate:.1f}% for overall business health and customer retention strategy
-                        - Use location rates (e.g., 38.7%, 39.6%) for comparing individual location performance
-                        """)
-
-                # Insights
-                st.info("""
-                **Understanding Customer Tiers:**
-                - **One-time**: Customers who have made only 1 booking (potential for conversion)
-                - **Light (2-3 bookings)**: Customers returning occasionally
-                - **Regular (4-6 bookings)**: Customers with established booking patterns
-                - **Frequent (7-10 bookings)**: Loyal customers who visit regularly
-                - **VIP (11+ bookings)**: Your most loyal customer base
-
-                **Location Loyalty Insights:**
-                - **Single location**: Brand loyal to specific location (consider location-specific retention programs)
-                - **2 locations**: Cross-location customers (appreciate variety)
-                - **3+ locations**: True Kuuma fans exploring all offerings
-
-                **Strategic Actions:**
-                - Target one-time customers with re-engagement campaigns
-                - Reward VIP and Frequent tiers with loyalty benefits
-                - Encourage single-location customers to try other branches
-                """)
-
             # Export functionality
             st.sidebar.markdown("---")
             st.sidebar.subheader("Export")
@@ -1040,7 +847,7 @@ else:
 
     3. **Analyze booking patterns**:
        - **Booking Intervals**: Average and median lead times, same-day booking rates, distribution charts
-       - **Visit Time Heatmap**: Day-of-week × hour-of-day patterns to optimize staffing and operations
+       - **Visit Time Heatmap**: Day-of-week x hour-of-day patterns to optimize staffing and operations
        - **Location Performance**: Compare booking behavior and capacity across locations
        - **Temperature Impact**: Optional analysis showing how weather affects booking advance planning
 
