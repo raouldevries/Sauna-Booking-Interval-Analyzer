@@ -100,6 +100,15 @@ def load_and_merge_files(uploaded_files):
         return None, None, []
 
     merged_df = pd.concat(dfs, ignore_index=True)
+
+    # Merge Activity and Tour columns into unified Location column
+    if 'Activity' in merged_df.columns and 'Tour' in merged_df.columns:
+        merged_df['Location'] = merged_df['Activity'].fillna(merged_df['Tour'])
+    elif 'Activity' in merged_df.columns:
+        merged_df['Location'] = merged_df['Activity']
+    elif 'Tour' in merged_df.columns:
+        merged_df['Location'] = merged_df['Tour']
+
     return merged_df, None, file_info
 
 # Time period classification
@@ -208,7 +217,9 @@ else:
 
     # Smart defaults for visit dates file
     default_start_col = "Start" if "Start" in df2.columns else df2.columns[0]
-    if "Activity" in df2.columns:
+    if "Location" in df2.columns:
+        default_location_col = "Location"
+    elif "Activity" in df2.columns:
         default_location_col = "Activity"
     elif "Tour" in df2.columns:
         default_location_col = "Tour"

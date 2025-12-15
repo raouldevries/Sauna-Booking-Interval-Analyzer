@@ -542,7 +542,14 @@ else:
     # Get locations from booking data
     available_locations = []
     if st.session_state.df2 is not None:
-        location_col = 'Activity' if 'Activity' in st.session_state.df2.columns else None
+        if 'Location' in st.session_state.df2.columns:
+            location_col = 'Location'
+        elif 'Activity' in st.session_state.df2.columns:
+            location_col = 'Activity'
+        elif 'Tour' in st.session_state.df2.columns:
+            location_col = 'Tour'
+        else:
+            location_col = None
         if location_col:
             available_locations = st.session_state.df2[location_col].unique().tolist()
             available_locations = [loc for loc in available_locations if loc in LOCATION_KEYWORDS]
@@ -1223,7 +1230,7 @@ else:
             revenue_data = {}
             if st.session_state.df1 is not None:
                 df1 = st.session_state.df1
-                location_col = 'Tour' if 'Tour' in df1.columns else ('Activity' if 'Activity' in df1.columns else None)
+                location_col = 'Location' if 'Location' in df1.columns else ('Tour' if 'Tour' in df1.columns else ('Activity' if 'Activity' in df1.columns else None))
                 revenue_col = 'Total gross' if 'Total gross' in df1.columns else None
                 if location_col:
                     revenue_data = get_revenue_per_location(df1, location_col, revenue_col)

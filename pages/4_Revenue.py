@@ -82,6 +82,15 @@ def load_and_merge_files(uploaded_files):
         return None, None, []
 
     merged_df = pd.concat(dfs, ignore_index=True)
+
+    # Merge Activity and Tour columns into unified Location column
+    if 'Activity' in merged_df.columns and 'Tour' in merged_df.columns:
+        merged_df['Location'] = merged_df['Activity'].fillna(merged_df['Tour'])
+    elif 'Activity' in merged_df.columns:
+        merged_df['Location'] = merged_df['Activity']
+    elif 'Tour' in merged_df.columns:
+        merged_df['Location'] = merged_df['Tour']
+
     return merged_df, None, file_info
 
 # Reserve container for navigation at top of sidebar
@@ -144,7 +153,9 @@ else:
     default_id_col = "Booking number" if "Booking number" in df1.columns else df1.columns[0]
     default_created_col = "Created" if "Created" in df1.columns else df1.columns[0]
 
-    if "Tour" in df1.columns:
+    if "Location" in df1.columns:
+        default_location_col = "Location"
+    elif "Tour" in df1.columns:
         default_location_col = "Tour"
     elif "Activity" in df1.columns:
         default_location_col = "Activity"
