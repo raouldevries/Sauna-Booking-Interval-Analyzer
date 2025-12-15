@@ -1173,11 +1173,17 @@ else:
             'conv_rate': 'Conv %'
         })
 
-        # Round all numeric columns to whole numbers
-        numeric_cols = ['Spend', 'Clicks', 'Conv', 'Value', 'CPC', 'CPA']
-        for col in numeric_cols:
+        # Round numeric columns appropriately
+        int_cols = ['Spend', 'Clicks', 'Conv', 'Value']
+        for col in int_cols:
             if col in display_df.columns:
                 display_df[col] = display_df[col].round(0).astype(int)
+
+        # Keep CPC and CPA with 2 decimal places
+        if 'CPC' in display_df.columns:
+            display_df['CPC'] = display_df['CPC'].round(2)
+        if 'CPA' in display_df.columns:
+            display_df['CPA'] = display_df['CPA'].round(2)
 
         if 'Conv %' in display_df.columns:
             display_df['Conv %'] = display_df['Conv %'].round(0).astype(int)
@@ -1203,12 +1209,12 @@ else:
             'Campaign': st.column_config.TextColumn('Campaign', help='Campaign name from ad platform'),
             'Platform': st.column_config.TextColumn('Platform', help='Google Ads or Meta Ads'),
             'STDC': st.column_config.TextColumn('STDC', help='SEE-THINK-DO-CARE funnel phase'),
-            'Spend': st.column_config.NumberColumn('Spend', help='Total ad spend for this campaign'),
+            'Spend': st.column_config.NumberColumn('Spend', help='Total ad spend for this campaign', format='€%d'),
             'Clicks': st.column_config.NumberColumn('Clicks', help='Link clicks on ads'),
             'Conv': st.column_config.NumberColumn('Conv', help='Purchases/conversions tracked'),
-            'Value': st.column_config.NumberColumn('Value', help='Conversion value reported'),
-            'CPC': st.column_config.NumberColumn('CPC', help='Cost per Click = Spend / Clicks'),
-            'CPA': st.column_config.NumberColumn('CPA', help='Cost per Acquisition = Spend / Conversions'),
+            'Value': st.column_config.NumberColumn('Value', help='Conversion value reported', format='€%d'),
+            'CPC': st.column_config.NumberColumn('CPC', help='Cost per Click = Spend / Clicks', format='€%.2f'),
+            'CPA': st.column_config.NumberColumn('CPA', help='Cost per Acquisition = Spend / Conversions', format='€%.2f'),
             'Conv %': st.column_config.NumberColumn('Conv %', help='Conversion Rate = Conversions / Clicks'),
         }
         st.dataframe(styled_df, use_container_width=True, hide_index=True, height=400, column_config=campaign_config)
