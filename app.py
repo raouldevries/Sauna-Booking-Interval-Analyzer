@@ -647,7 +647,8 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
 
         # Location filter (if location column selected)
         if location_col != "None" and 'location' in processed_data.columns:
-            all_locations = sorted(processed_data['location'].unique().tolist())
+            # Filter out NaN values and sort
+            all_locations = sorted([loc for loc in processed_data['location'].unique() if pd.notna(loc)])
             selected_locations = st.sidebar.multiselect(
                 "Locations",
                 options=all_locations,
