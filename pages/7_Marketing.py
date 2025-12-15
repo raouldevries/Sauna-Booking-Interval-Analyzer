@@ -1321,6 +1321,8 @@ else:
 
                 # Prepare display table
                 table_df = loc_summary.copy()
+                # Filter out any existing TOTAL row before sorting
+                table_df = table_df[table_df['Location'] != 'TOTAL']
                 table_df = table_df.sort_values('CPA', ascending=True)
 
                 table_display = table_df.copy()
