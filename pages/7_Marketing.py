@@ -745,9 +745,20 @@ else:
         st.markdown("---")
         st.markdown("### STDC Performance")
 
-        # Show loading placeholder for STDC section
+        # Show loading spinner for STDC section
         stdc_loading = st.empty()
-        stdc_loading.info("Calculating STDC metrics...")
+        with stdc_loading:
+            st.markdown("""
+            <div style="display: flex; align-items: center; padding: 1rem; background-color: #e3f2fd; border-radius: 8px; margin: 1rem 0;">
+                <div style="width: 24px; height: 24px; border: 3px solid #1976d2; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; margin-right: 12px;"></div>
+                <span style="color: #1976d2; font-weight: 500;">Calculating STDC metrics...</span>
+            </div>
+            <style>
+                @keyframes spin {
+                    to { transform: rotate(360deg); }
+                }
+            </style>
+            """, unsafe_allow_html=True)
 
         # Calculate metrics for each STDC phase with platform breakdown
         def get_phase_metrics(phase_name):
