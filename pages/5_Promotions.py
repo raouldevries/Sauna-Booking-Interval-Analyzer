@@ -427,7 +427,7 @@ else:
                     text='Bookings'
                 )
                 fig_promo.update_traces(marker_color='#e74c3c', textposition='outside')
-                fig_promo.update_layout(height=450, xaxis_tickangle=-45)
+                fig_promo.update_layout(height=500, xaxis_tickangle=-45, margin=dict(t=50))
                 st.plotly_chart(fig_promo, use_container_width=True)
 
                 # Top promotions by revenue
@@ -444,7 +444,7 @@ else:
                     text=top_promos_rev['Total Revenue'].apply(lambda x: f"€{x:,.0f}")
                 )
                 fig_promo_rev.update_traces(marker_color='#2ecc71', textposition='outside')
-                fig_promo_rev.update_layout(height=450, xaxis_tickangle=-45)
+                fig_promo_rev.update_layout(height=500, xaxis_tickangle=-45, margin=dict(t=50))
                 st.plotly_chart(fig_promo_rev, use_container_width=True)
 
                 # Comparison charts
@@ -470,7 +470,7 @@ else:
                         text=comparison_data['Avg Booking Value'].apply(lambda x: f"€{x:.2f}")
                     )
                     fig_comp_val.update_traces(marker_color=['#e74c3c', '#3498db'], textposition='outside')
-                    fig_comp_val.update_layout(height=400, showlegend=False)
+                    fig_comp_val.update_layout(height=450, showlegend=False, margin=dict(t=50))
                     st.plotly_chart(fig_comp_val, use_container_width=True)
 
                 with col2:
@@ -481,7 +481,7 @@ else:
                         title="Booking Distribution",
                         color_discrete_sequence=['#e74c3c', '#3498db']
                     )
-                    fig_comp_book.update_layout(height=400)
+                    fig_comp_book.update_layout(height=450)
                     st.plotly_chart(fig_comp_book, use_container_width=True)
 
                 # Revenue comparison
@@ -495,7 +495,7 @@ else:
                         title="Revenue Distribution",
                         color_discrete_sequence=['#e74c3c', '#3498db']
                     )
-                    fig_rev_comp.update_layout(height=400)
+                    fig_rev_comp.update_layout(height=450)
                     st.plotly_chart(fig_rev_comp, use_container_width=True)
 
                 with col2:
@@ -508,7 +508,7 @@ else:
                         text=comparison_data['Total Revenue'].apply(lambda x: f"€{x:,.0f}")
                     )
                     fig_rev_bar.update_traces(marker_color=['#e74c3c', '#3498db'], textposition='outside')
-                    fig_rev_bar.update_layout(height=400, showlegend=False)
+                    fig_rev_bar.update_layout(height=450, showlegend=False, margin=dict(t=50))
                     st.plotly_chart(fig_rev_bar, use_container_width=True)
 
                 # Promotion by location (if available)
@@ -543,7 +543,7 @@ else:
                         text='Promo Rate (%)'
                     )
                     fig_loc_promo.update_traces(marker_color='#9b59b6', textposition='outside')
-                    fig_loc_promo.update_layout(height=400, xaxis_tickangle=-45)
+                    fig_loc_promo.update_layout(height=450, xaxis_tickangle=-45, margin=dict(t=50))
                     st.plotly_chart(fig_loc_promo, use_container_width=True)
 
                 # Insights

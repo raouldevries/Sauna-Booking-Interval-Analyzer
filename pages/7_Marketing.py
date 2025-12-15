@@ -311,6 +311,9 @@ with col2:
 st.markdown("## Marketing Campaign Analysis")
 st.markdown("Analyze Google Ads and Meta Ads performance using the SEE-THINK-DO-CARE framework")
 
+# Reserve container for date range selector (filled after data loads)
+date_range_container = st.container()
+
 # Default file paths for auto-loading
 DEFAULT_DATA_PATH = "/Users/raouldevries/Work/Kuuma/Booking analyzer"
 DEFAULT_GOOGLE_ADS = f"{DEFAULT_DATA_PATH}/marketing data/google_ads.csv"
@@ -518,19 +521,26 @@ else:
     combined_df = pd.concat(dfs_to_combine, ignore_index=True)
 
     # Extract date range from data
-    date_range_str = ""
+    data_min_date = None
+    data_max_date = None
+
+    # Try to get dates from Meta Ads data
     if st.session_state.meta_ads_df is not None:
-        meta_df = st.session_state.meta_ads_df
-        if 'Reporting starts' in meta_df.columns and 'Reporting ends' in meta_df.columns:
+        meta_df_dates = st.session_state.meta_ads_df
+        if 'Reporting starts' in meta_df_dates.columns and 'Reporting ends' in meta_df_dates.columns:
             try:
-                start_dates = pd.to_datetime(meta_df['Reporting starts'], errors='coerce')
-                end_dates = pd.to_datetime(meta_df['Reporting ends'], errors='coerce')
-                min_date = start_dates.min()
-                max_date = end_dates.max()
-                if pd.notna(min_date) and pd.notna(max_date):
-                    date_range_str = f"{min_date.strftime('%d %b %Y')} - {max_date.strftime('%d %b %Y')}"
+                start_dates = pd.to_datetime(meta_df_dates['Reporting starts'], errors='coerce')
+                end_dates = pd.to_datetime(meta_df_dates['Reporting ends'], errors='coerce')
+                data_min_date = start_dates.min()
+                data_max_date = end_dates.max()
             except:
                 pass
+
+    # Add date columns to combined_df for filtering
+    if 'Reporting starts' in combined_df.columns:
+        combined_df['report_start'] = pd.to_datetime(combined_df['Reporting starts'], errors='coerce')
+    if 'Reporting ends' in combined_df.columns:
+        combined_df['report_end'] = pd.to_datetime(combined_df['Reporting ends'], errors='coerce')
 
     # Filter out campaigns with 0 spend or invalid names
     if 'spend' in combined_df.columns:
@@ -599,9 +609,28 @@ else:
         # Add STDC phase to dataframe
         combined_df['stdc_phase'] = combined_df['campaign_name'].map(st.session_state.stdc_tags)
 
-        # Display date range if available
-        if date_range_str:
-            st.info(f"**Data Period:** {date_range_str}")
+        # Date range selector
+        if pd.notna(data_min_date) and pd.notna(data_max_date):
+            with date_range_container:
+                date_col1, date_col2 = st.columns([2, 4])
+                with date_col1:
+                    date_range = st.date_input(
+                        "Date Range",
+                        value=(data_min_date.date(), data_max_date.date()),
+                        min_value=data_min_date.date(),
+                        max_value=data_max_date.date(),
+                        help="Filter marketing data by reporting period",
+                        key="mkt_date_range"
+                    )
+
+                # Apply date filter if dates are selected
+                if len(date_range) == 2 and 'report_start' in combined_df.columns:
+                    start_date, end_date = date_range
+                    # Filter campaigns that overlap with the selected date range
+                    combined_df = combined_df[
+                        (combined_df['report_start'].dt.date <= end_date) &
+                        (combined_df['report_end'].dt.date >= start_date)
+                    ]
 
         # Key Metrics
         st.markdown("### Key Metrics")
@@ -928,8 +957,8 @@ else:
             ))
 
         fig_funnel.update_layout(
-            height=350,
-            margin=dict(t=20, b=40, l=120, r=120),
+            height=400,
+            margin=dict(t=40, b=40, l=120, r=120),
             xaxis=dict(
                 title='',
                 showgrid=False,
@@ -1347,8 +1376,8 @@ else:
                     fig_cpa.add_vline(x=avg_cpa, line_dash="dash", line_color="#666",
                                       annotation_text=f"Avg: €{avg_cpa:,.0f}", annotation_position="top")
                     fig_cpa.update_layout(
-                        height=max(250, len(cpa_df) * 50),
-                        margin=dict(l=20, r=100, t=40, b=40),
+                        height=max(300, len(cpa_df) * 50),
+                        margin=dict(l=20, r=120, t=50, b=40),
                         xaxis_title='CPA (€)',
                         yaxis=dict(categoryorder='total ascending'),
                         showlegend=False

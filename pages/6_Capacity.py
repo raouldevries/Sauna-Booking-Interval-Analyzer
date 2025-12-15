@@ -363,9 +363,6 @@ else:
                 else:
                     date_range_str = f"{data_min.strftime('%b %y')} - {data_max.strftime('%b %y')}"
 
-                st.markdown(f"**Data Range:** {date_range_str}")
-                st.markdown("")
-
                 # Calculate occupancy per location per time period
                 # Group by location and time period
                 period_stats = capacity_data.groupby(['location', 'time_period']).agg({

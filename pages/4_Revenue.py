@@ -341,7 +341,7 @@ else:
                     labels={'location': 'Location', 'Total Revenue': 'Revenue (€)'}
                 )
                 fig_rev_loc.update_traces(marker_color='#2ecc71')
-                fig_rev_loc.update_layout(height=400, xaxis_tickangle=-45)
+                fig_rev_loc.update_layout(height=450, xaxis_tickangle=-45)
                 st.plotly_chart(fig_rev_loc, use_container_width=True)
 
             # ==================== CUSTOMER VALUE ====================
@@ -801,7 +801,7 @@ else:
                             color_discrete_map={'New': '#3498db', 'Regular': '#f39c12', 'VIP': '#9b59b6'}
                         )
                         fig_seg_clv.update_traces(textposition='outside')
-                        fig_seg_clv.update_layout(height=400, showlegend=False)
+                        fig_seg_clv.update_layout(height=450, showlegend=False, margin=dict(t=50))
                         st.plotly_chart(fig_seg_clv, use_container_width=True)
 
                     with col2:
@@ -816,7 +816,7 @@ else:
                             color_discrete_map={'New': '#3498db', 'Regular': '#f39c12', 'VIP': '#9b59b6'}
                         )
                         fig_seg_retention.update_traces(textposition='outside')
-                        fig_seg_retention.update_layout(height=400, showlegend=False)
+                        fig_seg_retention.update_layout(height=450, showlegend=False, margin=dict(t=50))
                         st.plotly_chart(fig_seg_retention, use_container_width=True)
 
                     # ===== CLV BY LOCATION =====
@@ -905,7 +905,7 @@ else:
                                 text=location_clv_df['CLV'].apply(lambda x: f"€{x:.0f}")
                             )
                             fig_loc_clv.update_traces(marker_color='#1abc9c', textposition='outside')
-                            fig_loc_clv.update_layout(height=400, xaxis_tickangle=-45)
+                            fig_loc_clv.update_layout(height=450, xaxis_tickangle=-45, margin=dict(t=50))
                             st.plotly_chart(fig_loc_clv, use_container_width=True)
 
                     # ===== INSIGHTS =====

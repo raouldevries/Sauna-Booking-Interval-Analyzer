@@ -363,8 +363,9 @@ else:
             fig_tiers.update_layout(
                 height=500,
                 showlegend=False,
+                margin=dict(t=50),
                 xaxis=dict(tickangle=0),
-                yaxis=dict(range=[0, 100])
+                yaxis=dict(range=[0, 105])  # Give room for labels above bars
             )
 
             st.plotly_chart(fig_tiers, use_container_width=True)

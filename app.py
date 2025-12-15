@@ -843,8 +843,9 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
             fig_dist.update_traces(marker_color='#1f77b4', text=text_labels, textposition='outside')
             fig_dist.update_layout(
                 showlegend=False,
-                height=400,
-                yaxis=dict(range=[0, 100])  # Always show 0-100% for percentage data
+                height=450,
+                margin=dict(t=50),
+                yaxis=dict(range=[0, 105])  # Give room for labels above bars
             )
 
             st.plotly_chart(fig_dist, use_container_width=True)
