@@ -7,6 +7,7 @@ import requests
 import numpy as np
 from io import BytesIO, StringIO
 import time
+from data_loader import init_session_state, get_location_column, get_available_locations
 
 # Google Drive imports
 try:
@@ -45,17 +46,8 @@ with col2:
 # Reserve container for date range selector (filled after data loads)
 date_range_container = st.container()
 
-# Initialize session state
-if 'df1' not in st.session_state:
-    st.session_state.df1 = None
-if 'df2' not in st.session_state:
-    st.session_state.df2 = None
-if 'google_ads_df' not in st.session_state:
-    st.session_state.google_ads_df = None
-if 'meta_ads_df' not in st.session_state:
-    st.session_state.meta_ads_df = None
-if 'drive_loaded' not in st.session_state:
-    st.session_state.drive_loaded = False
+# Initialize session state using centralized function
+init_session_state()
 
 # Google Drive functions
 @st.cache_resource
@@ -92,7 +84,7 @@ def list_drive_files(folder_id):
         st.error(f"Failed to list Drive files: {e}")
         return []
 
-@st.cache_data(ttl=3600, show_spinner=False)  # Cache for 1 hour
+@st.cache_data(ttl=14400, show_spinner=False)  # Cache for 4 hours
 def download_drive_file_bytes(file_id, file_name):
     """Download a file from Google Drive and return as bytes (cached)."""
     service = get_drive_service()
@@ -874,7 +866,7 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
 
                 st.markdown("Compare booking behavior across different locations.")
 
-                with st.expander("Understanding Average vs Median"):
+                with st.expander("Understanding Average vs Median", expanded=False):
                     st.markdown("""
                     - **Average** - Includes all bookings, including customers who book far in advance (e.g., 30 days ahead)
                     - **Median** - Shows what a typical customer actually does, ignoring extreme values
@@ -1003,7 +995,7 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
 
                     st.plotly_chart(fig_temp, use_container_width=True)
 
-                    with st.expander("How to read the bubble plot"):
+                    with st.expander("How to read the bubble plot", expanded=False):
                         st.markdown("""
 - **Horizontal position** (X-axis): Average temperature when booking was made
 - **Vertical position** (Y-axis): How far in advance customers book

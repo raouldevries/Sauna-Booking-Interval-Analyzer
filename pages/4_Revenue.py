@@ -8,6 +8,9 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
+import sys
+sys.path.insert(0, '..')
+from data_loader import init_session_state
 
 # Page configuration
 st.set_page_config(
@@ -40,9 +43,8 @@ date_range_container = st.container()
 st.markdown("## Revenue & Value Analysis")
 st.markdown("Revenue trends, promotion effectiveness, and customer lifetime value")
 
-# Initialize session state
-if 'df1' not in st.session_state:
-    st.session_state.df1 = None
+# Initialize session state using centralized function
+init_session_state()
 
 # Parse uploaded files
 @st.cache_data
@@ -414,7 +416,7 @@ else:
                         )
 
                     # Explanation of Current Value calculations
-                    with st.expander("How Current Value is Calculated"):
+                    with st.expander("How Current Value is Calculated", expanded=False):
                         st.markdown("""
                         **Current Value** shows what each customer has actually spent to date.
 
@@ -678,7 +680,7 @@ else:
                             help="Expected revenue per active customer over the next 3 months."
                         )
 
-                    with st.expander("How the 3-Month Projection is Calculated"):
+                    with st.expander("How the 3-Month Projection is Calculated", expanded=False):
                         st.markdown(f"""
 **Formula:**
 ```
@@ -915,7 +917,7 @@ else:
                     highest_seg = segment_clv_df.loc[segment_clv_df['CLV'].idxmax()]
                     lowest_churn_seg = segment_clv_df.loc[segment_clv_df['Churn Rate'].idxmin()]
 
-                    with st.expander("CLV Insights"):
+                    with st.expander("CLV Insights", expanded=False):
                         st.markdown(f"""
 - **Overall CLV:** €{clv:.2f} per customer
 - **Highest Value Segment:** {highest_seg['Segment']} with €{highest_seg['CLV']:.2f} CLV

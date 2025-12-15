@@ -8,6 +8,9 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from io import StringIO
+import sys
+sys.path.insert(0, '..')
+from data_loader import init_session_state
 
 # Page configuration
 st.set_page_config(
@@ -388,15 +391,8 @@ def load_default_files():
         except Exception as e:
             pass
 
-# Initialize session state
-if 'df1' not in st.session_state:
-    st.session_state.df1 = None
-if 'df2' not in st.session_state:
-    st.session_state.df2 = None
-if 'google_ads_df' not in st.session_state:
-    st.session_state.google_ads_df = None
-if 'meta_ads_df' not in st.session_state:
-    st.session_state.meta_ads_df = None
+# Initialize session state using centralized function
+init_session_state()
 
 # Auto-load default files
 load_default_files()

@@ -8,6 +8,9 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
+import sys
+sys.path.insert(0, '..')
+from data_loader import init_session_state
 
 # Page configuration
 st.set_page_config(
@@ -66,11 +69,8 @@ date_range_container = st.container()
 st.markdown("## Capacity Analysis")
 st.markdown("Occupancy rates and utilization per location and time period")
 
-# Initialize session state
-if 'df1' not in st.session_state:
-    st.session_state.df1 = None
-if 'df2' not in st.session_state:
-    st.session_state.df2 = None
+# Initialize session state using centralized function
+init_session_state()
 
 # Parse uploaded files
 @st.cache_data
@@ -546,7 +546,7 @@ else:
 **Peak Time for {selected_heatmap_location}**: {peak_day} at {peak_hour:02d}:00 - {(peak_hour+1):02d}:00 with {peak_count} visits.
                         """)
 
-                    with st.expander("How to Read the Heatmap"):
+                    with st.expander("How to Read the Heatmap", expanded=False):
                         st.markdown("""
 **Understanding the Visualization:**
 - **X-axis**: Days of the week (Monday through Sunday)
@@ -843,7 +843,7 @@ Use this heatmap to optimize your team schedule - ensure adequate coverage durin
 
                     # Explanation
                     st.markdown("---")
-                    with st.expander("Understanding the Metrics"):
+                    with st.expander("Understanding the Metrics", expanded=False):
                         st.markdown("""
                         ### Time Periods
                         - **Dal uren (Ma/Do 10:00-16:00)**: Off-peak hours on weekdays. Lower traffic, opportunity for promotions.

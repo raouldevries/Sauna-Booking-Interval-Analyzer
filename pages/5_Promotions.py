@@ -8,6 +8,9 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
+import sys
+sys.path.insert(0, '..')
+from data_loader import init_session_state
 
 # Page configuration
 st.set_page_config(
@@ -40,11 +43,8 @@ date_range_container = st.container()
 st.markdown("## Promotion Effectiveness")
 st.markdown("Analyze promotion usage, revenue impact, and conversion rates")
 
-# Initialize session state
-if 'df1' not in st.session_state:
-    st.session_state.df1 = None
-if 'df2' not in st.session_state:
-    st.session_state.df2 = None
+# Initialize session state using centralized function
+init_session_state()
 
 # Parse uploaded files
 @st.cache_data
