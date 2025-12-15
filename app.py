@@ -286,19 +286,38 @@ if not st.session_state.authenticated:
             if password == "Kuuma2026!":
                 st.session_state.authenticated = True
 
-                # Load data immediately after login
+                # Load data immediately after login with progress bar
                 if GOOGLE_DRIVE_AVAILABLE and "gcp_service_account" in st.secrets and "google_drive" in st.secrets:
-                    with st.spinner("Loading data from Google Drive..."):
-                        df1, df2, google_ads_df, meta_ads_df, error = load_files_from_drive()
-                        if df1 is not None:
-                            st.session_state.df1 = df1
-                        if df2 is not None:
-                            st.session_state.df2 = df2
-                        if google_ads_df is not None:
-                            st.session_state.google_ads_df = google_ads_df
-                        if meta_ads_df is not None:
-                            st.session_state.meta_ads_df = meta_ads_df
-                        st.session_state.drive_loaded = True
+                    progress_bar = st.progress(0, text="Connecting to Google Drive...")
+
+                    # Animate progress while connecting (0-30%)
+                    for i in range(30):
+                        time.sleep(0.02)
+                        progress_bar.progress(i + 1, text="Connecting to Google Drive...")
+
+                    # Load data (progress jumps during actual loading)
+                    progress_bar.progress(35, text="Loading booking data...")
+                    df1, df2, google_ads_df, meta_ads_df, error = load_files_from_drive()
+
+                    # Store data in session state
+                    progress_bar.progress(70, text="Processing data...")
+                    if df1 is not None:
+                        st.session_state.df1 = df1
+                    if df2 is not None:
+                        st.session_state.df2 = df2
+                    if google_ads_df is not None:
+                        st.session_state.google_ads_df = google_ads_df
+                    if meta_ads_df is not None:
+                        st.session_state.meta_ads_df = meta_ads_df
+                    st.session_state.drive_loaded = True
+
+                    # Complete progress animation (70-100%)
+                    for i in range(70, 100):
+                        time.sleep(0.01)
+                        progress_bar.progress(i + 1, text="Finalizing...")
+
+                    time.sleep(0.3)
+                    progress_bar.empty()
 
                 st.switch_page("pages/1_Overview.py")
             else:
