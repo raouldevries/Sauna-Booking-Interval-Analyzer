@@ -77,16 +77,6 @@ if not st.session_state.authenticated:
             else:
                 st.error("Incorrect password. Please try again.")
 
-        # Start loading data from Google Drive in background while on login page
-        # This pre-loads data so it's ready when user logs in
-        if not st.session_state.get('drive_loaded', False):
-            with st.spinner("Preparing data..."):
-                # Trigger data loading (will be cached)
-                if "google_drive" in st.secrets:
-                    folder_id = st.secrets["google_drive"].get("folder_id", "")
-                    if folder_id:
-                        list_drive_files(folder_id)  # Pre-cache file list
-
     st.stop()
 
 # ============ AUTHENTICATED CONTENT BELOW ============
