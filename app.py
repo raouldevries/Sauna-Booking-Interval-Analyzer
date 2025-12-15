@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import requests
 import numpy as np
-from io import BytesIO
+from io import BytesIO, StringIO
 import time
 
 # Google Drive imports
@@ -213,7 +213,24 @@ def load_files_from_drive():
             file_buffer = download_drive_file(f['id'], f['name'])
             if file_buffer:
                 try:
-                    df = pd.read_csv(file_buffer)
+                    # Google Ads CSV has 2-line header, skip them
+                    content = file_buffer.getvalue().decode('utf-8')
+                    lines = content.split('\n')
+                    csv_content = '\n'.join(lines[2:])
+                    df = pd.read_csv(StringIO(csv_content))
+                    df['Platform'] = 'Google Ads'
+                    # Apply column mapping
+                    column_mapping = {
+                        'Campaign': 'campaign_name',
+                        'Cost': 'spend',
+                        'Conversions': 'conversions',
+                        'Conv. value': 'conversion_value',
+                        'Impr.': 'impressions',
+                        'Clicks': 'clicks',
+                        'CTR': 'ctr',
+                        'Avg. CPC': 'cpc'
+                    }
+                    df = df.rename(columns=column_mapping)
                     dfs.append(df)
                 except Exception as e:
                     st.warning(f"Could not read {f['name']}: {e}")
@@ -229,6 +246,21 @@ def load_files_from_drive():
             if file_buffer:
                 try:
                     df = pd.read_csv(file_buffer)
+                    df['Platform'] = 'Meta Ads'
+                    # Apply column mapping
+                    column_mapping = {
+                        'Campaign name': 'campaign_name',
+                        'Amount spent (EUR)': 'spend',
+                        'Purchases': 'conversions',
+                        'Purchases conversion value': 'conversion_value',
+                        'Reach': 'reach',
+                        'Link clicks': 'clicks',
+                        'CTR (link click-through rate)': 'ctr',
+                        'CPC (cost per link click) (EUR)': 'cpc',
+                        'CPM (cost per 1,000 impressions) (EUR)': 'cpm',
+                        'Results': 'results'
+                    }
+                    df = df.rename(columns=column_mapping)
                     dfs.append(df)
                 except Exception as e:
                     st.warning(f"Could not read {f['name']}: {e}")
