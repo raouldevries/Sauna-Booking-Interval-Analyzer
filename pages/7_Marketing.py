@@ -1080,6 +1080,11 @@ else:
         # Prepare display table with more metrics
         display_df = combined_df.copy()
 
+        # Filter out campaigns with invalid names (containing "--" or empty)
+        display_df = display_df[~display_df['campaign_name'].astype(str).str.contains('^-+$|^ *$', regex=True, na=True)]
+        display_df = display_df[display_df['campaign_name'].notna()]
+        display_df = display_df[display_df['campaign_name'].astype(str).str.strip() != '']
+
         # Calculate additional metrics
         display_df['cpc'] = display_df.apply(
             lambda x: x['spend'] / x['clicks'] if x['clicks'] > 0 else 0, axis=1
