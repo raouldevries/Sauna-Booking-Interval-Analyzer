@@ -585,6 +585,12 @@ else:
         st.sidebar.info(f"Showing all {len(combined_df)} campaigns")
 
     if len(combined_df) > 0:
+        # Check if campaign_name column exists
+        if 'campaign_name' not in combined_df.columns:
+            st.error("Marketing data is missing 'campaign_name' column. Please reboot the app in Streamlit Cloud (Manage app → Reboot) to reload data with correct column mapping.")
+            st.write("**Available columns:**", list(combined_df.columns))
+            st.stop()
+
         # Initialize STDC tags for new campaigns
         for campaign in combined_df['campaign_name'].unique():
             if campaign not in st.session_state.stdc_tags:
