@@ -609,7 +609,8 @@ else:
         combined_df = combined_df[combined_df['campaign_name'].notna()]
         combined_df = combined_df[combined_df['campaign_name'].astype(str).str.strip() != '']
         # Filter out summary rows like "--" which are not actual campaigns
-        combined_df = combined_df[~combined_df['campaign_name'].astype(str).str.match(r'^-+$')]
+        combined_df = combined_df[~combined_df['campaign_name'].astype(str).str.strip().str.match(r'^-+$')]
+        combined_df = combined_df[~combined_df['campaign_name'].astype(str).str.contains(r'^\s*-+\s*$', regex=True)]
 
     # Get locations from booking data
     available_locations = []
