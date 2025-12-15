@@ -91,8 +91,9 @@ def list_drive_files(folder_id):
         st.error(f"Failed to list Drive files: {e}")
         return []
 
-def download_drive_file(file_id, file_name):
-    """Download a file from Google Drive and return as BytesIO."""
+@st.cache_data(ttl=3600, show_spinner=False)  # Cache for 1 hour
+def download_drive_file_bytes(file_id, file_name):
+    """Download a file from Google Drive and return as bytes (cached)."""
     service = get_drive_service()
     if not service:
         return None
@@ -104,12 +105,18 @@ def download_drive_file(file_id, file_name):
         done = False
         while not done:
             _, done = downloader.next_chunk()
-        file_buffer.seek(0)
-        file_buffer.name = file_name  # Add name attribute for file type detection
-        return file_buffer
+        return file_buffer.getvalue()  # Return bytes for caching
     except Exception as e:
-        st.error(f"Failed to download {file_name}: {e}")
         return None
+
+def download_drive_file(file_id, file_name):
+    """Download a file from Google Drive and return as BytesIO."""
+    file_bytes = download_drive_file_bytes(file_id, file_name)
+    if file_bytes is None:
+        return None
+    file_buffer = BytesIO(file_bytes)
+    file_buffer.name = file_name
+    return file_buffer
 
 def load_files_from_drive():
     """Load booking, visit date, and marketing files from Google Drive."""
