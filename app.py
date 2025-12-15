@@ -248,10 +248,18 @@ def load_files_from_drive():
 
 # Password protection - Show login page if not authenticated
 if not st.session_state.authenticated:
-    # Hide sidebar on login page
+    # Hide sidebar on login page and style login button
     st.markdown("""
     <style>
     [data-testid="stSidebar"] { display: none; }
+    button[kind="primary"] {
+        background-color: #3C3C3C !important;
+        color: #fff !important;
+        border: none !important;
+    }
+    button[kind="primary"]:hover {
+        background-color: #2a2a2a !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
