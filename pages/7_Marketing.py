@@ -622,11 +622,15 @@ else:
                 # Apply date filter if dates are selected
                 if len(date_range) == 2 and 'report_start' in combined_df.columns:
                     start_date, end_date = date_range
-                    # Filter campaigns that overlap with the selected date range
-                    combined_df = combined_df[
+                    # Only filter rows that have date info (Meta Ads)
+                    # Keep rows without dates (Google Ads) - they don't have reporting period columns
+                    has_dates = combined_df['report_start'].notna() & combined_df['report_end'].notna()
+                    date_filter = (
                         (combined_df['report_start'].dt.date <= end_date) &
                         (combined_df['report_end'].dt.date >= start_date)
-                    ]
+                    )
+                    # Keep rows without dates OR rows that pass the date filter
+                    combined_df = combined_df[~has_dates | date_filter]
 
         # Key Metrics
         st.markdown("### Key Metrics")
