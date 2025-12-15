@@ -72,6 +72,12 @@ st.markdown("Occupancy rates and utilization per location and time period")
 # Initialize session state using centralized function
 init_session_state()
 
+# Check authentication
+if not st.session_state.get('authenticated', False):
+    st.warning("Please log in to access this page.")
+    st.page_link("app.py", label="Go to Login", icon=":material/login:")
+    st.stop()
+
 # Parse uploaded files
 @st.cache_data
 def load_excel_file(uploaded_file):
@@ -195,6 +201,7 @@ if uploaded_files2:
 if st.session_state.df1 is not None and st.session_state.df2 is not None:
     with nav_container:
         st.markdown("### Navigation")
+        st.page_link("pages/1_Overview.py", label="Overview", icon=":material/home:")
         st.page_link("app.py", label="Booking Patterns", icon=":material/bar_chart:")
         st.page_link("pages/3_Customers.py", label="Recurring Customers", icon=":material/group:")
         st.page_link("pages/4_Revenue.py", label="Revenue & Value", icon=":material/payments:")

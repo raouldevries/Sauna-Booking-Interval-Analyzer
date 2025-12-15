@@ -35,6 +35,62 @@ hide_default_nav = """
 """
 st.markdown(hide_default_nav, unsafe_allow_html=True)
 
+# Initialize session state using centralized function
+init_session_state()
+
+# Initialize authentication state
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
+
+# Password protection - Show login page if not authenticated
+if not st.session_state.authenticated:
+    # Hide sidebar on login page
+    st.markdown("""
+    <style>
+    [data-testid="stSidebar"] { display: none; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # Centered login container
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("<div style='height: 80px'></div>", unsafe_allow_html=True)
+
+        # Kuuma logo centered
+        st.markdown("""
+        <div style="display: flex; justify-content: center; margin-bottom: 2rem;">
+            <img src="https://kuuma.nl/wp-content/themes/kuuma/images/logo.svg" width="180">
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("<h2 style='text-align: center; margin-bottom: 0.5rem;'>Kuuma Booking Analyzer</h2>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #666; margin-bottom: 2rem;'>Customer insights & booking intelligence</p>", unsafe_allow_html=True)
+
+        # Password input
+        password = st.text_input("Enter password", type="password", key="login_password")
+
+        # Login button
+        if st.button("Login", use_container_width=True, type="primary"):
+            if password == "Kuuma2026!":
+                st.session_state.authenticated = True
+                st.switch_page("pages/1_Overview.py")
+            else:
+                st.error("Incorrect password. Please try again.")
+
+        # Start loading data from Google Drive in background while on login page
+        # This pre-loads data so it's ready when user logs in
+        if not st.session_state.get('drive_loaded', False):
+            with st.spinner("Preparing data..."):
+                # Trigger data loading (will be cached)
+                if "google_drive" in st.secrets:
+                    folder_id = st.secrets["google_drive"].get("folder_id", "")
+                    if folder_id:
+                        list_drive_files(folder_id)  # Pre-cache file list
+
+    st.stop()
+
+# ============ AUTHENTICATED CONTENT BELOW ============
+
 # Header with logo
 col1, col2 = st.columns([1, 5])
 with col1:
@@ -45,9 +101,6 @@ with col2:
 
 # Reserve container for date range selector (filled after data loads)
 date_range_container = st.container()
-
-# Initialize session state using centralized function
-init_session_state()
 
 # Google Drive functions
 @st.cache_resource
@@ -468,6 +521,7 @@ else:
 if st.session_state.df1 is not None and st.session_state.df2 is not None:
     with nav_container:
         st.markdown("### Navigation")
+        st.page_link("pages/1_Overview.py", label="Overview", icon=":material/home:")
         st.page_link("app.py", label="Booking Patterns", icon=":material/bar_chart:")
         st.page_link("pages/3_Customers.py", label="Recurring Customers", icon=":material/group:")
         st.page_link("pages/4_Revenue.py", label="Revenue & Value", icon=":material/payments:")
