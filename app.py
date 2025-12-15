@@ -646,7 +646,7 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
         st.sidebar.subheader("Filters")
 
         # Location filter (if location column selected)
-        if location_col != "None":
+        if location_col != "None" and 'location' in processed_data.columns:
             all_locations = sorted(processed_data['location'].unique().tolist())
             selected_locations = st.sidebar.multiselect(
                 "Locations",
