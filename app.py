@@ -173,6 +173,13 @@ def load_files_from_drive():
                     st.warning(f"Could not read {f['name']}: {e}")
         if dfs:
             df1 = pd.concat(dfs, ignore_index=True)
+            # Merge Activity and Tour columns into unified Location column
+            if 'Activity' in df1.columns and 'Tour' in df1.columns:
+                df1['Location'] = df1['Activity'].fillna(df1['Tour'])
+            elif 'Activity' in df1.columns:
+                df1['Location'] = df1['Activity']
+            elif 'Tour' in df1.columns:
+                df1['Location'] = df1['Tour']
 
     # Load and merge visit files
     df2 = None
@@ -189,6 +196,13 @@ def load_files_from_drive():
                     st.warning(f"Could not read {f['name']}: {e}")
         if dfs:
             df2 = pd.concat(dfs, ignore_index=True)
+            # Merge Activity and Tour columns into unified Location column
+            if 'Activity' in df2.columns and 'Tour' in df2.columns:
+                df2['Location'] = df2['Activity'].fillna(df2['Tour'])
+            elif 'Activity' in df2.columns:
+                df2['Location'] = df2['Activity']
+            elif 'Tour' in df2.columns:
+                df2['Location'] = df2['Tour']
 
     # Load Google Ads CSV files
     google_ads_df = None
@@ -263,6 +277,15 @@ def load_and_merge_files(uploaded_files):
 
     # Merge all dataframes
     merged_df = pd.concat(dfs, ignore_index=True)
+
+    # Merge Activity and Tour columns into unified Location column
+    if 'Activity' in merged_df.columns and 'Tour' in merged_df.columns:
+        merged_df['Location'] = merged_df['Activity'].fillna(merged_df['Tour'])
+    elif 'Activity' in merged_df.columns:
+        merged_df['Location'] = merged_df['Activity']
+    elif 'Tour' in merged_df.columns:
+        merged_df['Location'] = merged_df['Tour']
+
     return merged_df, None, file_info
 
 # Reserve container for navigation at top of sidebar
