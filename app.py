@@ -98,6 +98,7 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
         st.page_link("pages/3_Customers.py", label="Recurring Customers", icon=":material/group:")
         st.page_link("pages/4_Revenue.py", label="Revenue & Value", icon=":material/payments:")
         st.page_link("pages/5_Promotions.py", label="Promotions", icon=":material/sell:")
+        st.page_link("pages/6_Capacity.py", label="Capacity Analysis", icon=":material/analytics:")
         st.markdown("---")
 
 # Column mapping section

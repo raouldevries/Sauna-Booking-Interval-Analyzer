@@ -1,0 +1,804 @@
+"""
+Kuuma Booking Analyzer - Capacity Analysis Page
+Occupancy/utilization analysis per location and time period
+"""
+
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+from datetime import datetime
+
+# Page configuration
+st.set_page_config(
+    page_title="Kuuma - Capacity Analysis",
+    page_icon="🔥",
+    layout="wide"
+)
+
+# Hide default Streamlit navigation
+hide_default_nav = """
+<style>
+[data-testid="stSidebarNav"] {
+    display: none;
+}
+</style>
+"""
+st.markdown(hide_default_nav, unsafe_allow_html=True)
+
+# Capacity data from Bezettings analyse
+# dal + piek = weekday (ma-do) capacity
+LOCATION_CAPACITY = {
+    'Kuuma Marineterrein Matsu': {'dal': 96, 'piek': 366, 'weekday': 462, 'weekend': 198, 'cluster': 'Flagship'},
+    'Kuuma Marineterrein Bjørk': {'dal': 128, 'piek': 488, 'weekday': 616, 'weekend': 264, 'cluster': 'Flagship'},
+    'Kuuma Noord': {'dal': 96, 'piek': 336, 'weekday': 432, 'weekend': 192, 'cluster': 'Groeier'},
+    'Kuuma Sloterplas': {'dal': 112, 'piek': 392, 'weekday': 504, 'weekend': 224, 'cluster': 'Groeier'},
+    'Kuuma Aan ´t IJ (Centrum)': {'dal': 96, 'piek': 324, 'weekday': 420, 'weekend': 180, 'cluster': 'Groeier'},
+}
+
+CLUSTER_TARGETS = {
+    'Flagship': {'total': (75, 80), 'weekend': (90, 95), 'piek': (80, 85), 'dal': (55, 60)},
+    'Groeier': {'total': (60, 65), 'weekend': (80, 85), 'piek': (70, 75), 'dal': (30, 40)},
+    'Onderbenut': {'total': (50, 55), 'weekend': (70, 75), 'piek': (60, 65), 'dal': (25, 30)},
+}
+
+# Header with logo
+col1, col2 = st.columns([1, 5])
+with col1:
+    st.image("https://kuuma.nl/wp-content/themes/kuuma/images/logo.svg", width=120)
+with col2:
+    st.title("Kuuma Booking Analyzer")
+    st.markdown("**Customer insights & booking intelligence**")
+
+st.markdown("## Capacity Analysis")
+st.markdown("Occupancy rates and utilization per location and time period")
+
+# Initialize session state
+if 'df1' not in st.session_state:
+    st.session_state.df1 = None
+if 'df2' not in st.session_state:
+    st.session_state.df2 = None
+
+# Parse uploaded files
+@st.cache_data
+def load_excel_file(uploaded_file):
+    try:
+        file_name = uploaded_file.name
+        if file_name.endswith('.xls'):
+            engine = 'xlrd'
+        else:
+            engine = 'openpyxl'
+        df = pd.read_excel(uploaded_file, engine=engine)
+        return df, None
+    except Exception as e:
+        return None, str(e)
+
+# Time period classification
+def classify_time_period(dt):
+    """
+    Classify a datetime into time periods:
+    - weekend: Fri, Sat, Sun (all hours)
+    - dal: Mon-Thu 10:00-16:00
+    - piek: Mon-Thu outside 10:00-16:00
+    """
+    day_of_week = dt.weekday()  # 0=Mon, 6=Sun
+    hour = dt.hour
+    if day_of_week >= 4:  # Fri (4), Sat (5), Sun (6)
+        return 'weekend'
+    elif 10 <= hour < 16:  # Mon-Thu 10:00-16:00
+        return 'dal'
+    else:
+        return 'piek'
+
+def is_weekday(dt):
+    """Check if datetime is Monday-Thursday"""
+    return dt.weekday() < 4
+
+# Reserve container for navigation at top of sidebar
+nav_container = st.sidebar.container()
+
+# Sidebar - Upload section
+st.sidebar.header("Upload & Configure")
+
+# File uploaders
+uploaded_file1 = st.sidebar.file_uploader(
+    "Booking Creation Dates (.xls/.xlsx)",
+    type=["xls", "xlsx"],
+    help="Upload the file containing when bookings were created",
+    key="cap_file1"
+)
+
+uploaded_file2 = st.sidebar.file_uploader(
+    "Visit Dates (.xls/.xlsx)",
+    type=["xls", "xlsx"],
+    help="Upload the file containing when customers actually visited",
+    key="cap_file2"
+)
+
+# Load File 1
+if uploaded_file1 is not None:
+    df1, error1 = load_excel_file(uploaded_file1)
+    if error1:
+        st.sidebar.error(f"Error reading File 1: {error1}")
+    else:
+        st.session_state.df1 = df1
+        st.sidebar.success(f"File 1 loaded: {len(df1):,} rows")
+
+# Load File 2
+if uploaded_file2 is not None:
+    df2, error2 = load_excel_file(uploaded_file2)
+    if error2:
+        st.sidebar.error(f"Error reading File 2: {error2}")
+    else:
+        st.session_state.df2 = df2
+        st.sidebar.success(f"File 2 loaded: {len(df2):,} rows")
+
+# Fill navigation container (now that files are loaded)
+if st.session_state.df1 is not None and st.session_state.df2 is not None:
+    with nav_container:
+        st.markdown("### Navigation")
+        st.page_link("app.py", label="Booking Patterns", icon=":material/bar_chart:")
+        st.page_link("pages/3_Customers.py", label="Recurring Customers", icon=":material/group:")
+        st.page_link("pages/4_Revenue.py", label="Revenue & Value", icon=":material/payments:")
+        st.page_link("pages/5_Promotions.py", label="Promotions", icon=":material/sell:")
+        st.page_link("pages/6_Capacity.py", label="Capacity Analysis", icon=":material/analytics:")
+        st.markdown("---")
+
+# Main content
+if st.session_state.df2 is None:
+    st.info("**No data loaded.** Please upload your Visit Dates file using the sidebar to begin capacity analysis.")
+    st.markdown("""
+    ### Getting Started
+    1. Upload your visit dates file (contains visit times and locations)
+    2. View occupancy rates by location and time period
+    3. Compare actual performance vs targets
+
+    ### Time Periods Analyzed
+    - **Dal uren (Ma/Do 10:00-16:00)**: Off-peak weekday hours
+    - **Piek uren (al het overige)**: Peak weekday hours (Mon-Thu outside 10-16)
+    - **Weekend (vrij/za/zo)**: Friday, Saturday, Sunday
+    - **Maandag - donderdag**: Combined weekday view
+    """)
+else:
+    df2 = st.session_state.df2
+
+    # Column mapping
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Column Mapping")
+
+    # Smart defaults for visit dates file
+    default_start_col = "Start" if "Start" in df2.columns else df2.columns[0]
+    if "Activity" in df2.columns:
+        default_location_col = "Activity"
+    elif "Tour" in df2.columns:
+        default_location_col = "Tour"
+    else:
+        default_location_col = None
+    default_participants_col = "Participants" if "Participants" in df2.columns else None
+
+    visit_col = st.sidebar.selectbox(
+        "Visit Date/Time",
+        options=df2.columns.tolist(),
+        index=df2.columns.tolist().index(default_start_col) if default_start_col in df2.columns else 0,
+        key="cap_visit_col"
+    )
+
+    location_options = ["None"] + df2.columns.tolist()
+    location_default_index = location_options.index(default_location_col) if default_location_col in location_options else 0
+
+    location_col = st.sidebar.selectbox(
+        "Location",
+        options=location_options,
+        index=location_default_index,
+        key="cap_location_col"
+    )
+
+    participants_options = ["None"] + df2.columns.tolist()
+    participants_default_index = participants_options.index(default_participants_col) if default_participants_col in participants_options else 0
+
+    participants_col = st.sidebar.selectbox(
+        "Participants (optional)",
+        options=participants_options,
+        index=participants_default_index,
+        help="Number of people per booking. If not selected, each booking counts as 1.",
+        key="cap_participants_col"
+    )
+
+    # Check if location column is configured
+    if location_col == "None":
+        st.warning("""
+        **Location column not configured.**
+
+        To use capacity analysis, please select a Location column in the sidebar.
+        This allows us to calculate occupancy rates per location.
+        """)
+    else:
+        # Prepare data
+        capacity_data = df2[[visit_col, location_col]].copy()
+        capacity_data.columns = ['visit_datetime', 'location']
+
+        # Add participants if available
+        if participants_col != "None":
+            capacity_data['participants'] = df2[participants_col]
+        else:
+            capacity_data['participants'] = 1
+
+        # Convert to datetime
+        capacity_data['visit_datetime'] = pd.to_datetime(capacity_data['visit_datetime'], errors='coerce')
+
+        # Remove invalid dates
+        capacity_data = capacity_data[capacity_data['visit_datetime'].notna()]
+
+        # Filter to known locations only
+        known_locations = list(LOCATION_CAPACITY.keys())
+        capacity_data = capacity_data[capacity_data['location'].isin(known_locations)]
+
+        if len(capacity_data) == 0:
+            st.warning(f"""
+            **No matching locations found.**
+
+            The capacity analysis requires locations that match the configured sauna locations:
+            {', '.join(known_locations)}
+
+            Your data contains: {', '.join(df2[location_col].unique()[:5])}...
+            """)
+        else:
+            # Classify time periods
+            capacity_data['time_period'] = capacity_data['visit_datetime'].apply(classify_time_period)
+            capacity_data['is_weekday'] = capacity_data['visit_datetime'].apply(is_weekday)
+
+            # Extract week for weekly analysis
+            capacity_data['week'] = capacity_data['visit_datetime'].dt.isocalendar().week
+            capacity_data['year'] = capacity_data['visit_datetime'].dt.year
+            capacity_data['year_week'] = capacity_data['year'].astype(str) + '-W' + capacity_data['week'].astype(str).str.zfill(2)
+
+            # Date range filter
+            st.sidebar.markdown("---")
+            st.sidebar.subheader("Filters")
+
+            min_date = capacity_data['visit_datetime'].min().date()
+            max_date = capacity_data['visit_datetime'].max().date()
+
+            date_range = st.sidebar.date_input(
+                "Date Range",
+                value=(min_date, max_date),
+                min_value=min_date,
+                max_value=max_date,
+                key="cap_date_range"
+            )
+
+            # Apply date filter
+            if len(date_range) == 2:
+                start_date, end_date = date_range
+                capacity_data = capacity_data[
+                    (capacity_data['visit_datetime'].dt.date >= start_date) &
+                    (capacity_data['visit_datetime'].dt.date <= end_date)
+                ]
+
+            # Location filter
+            available_locations = sorted(capacity_data['location'].unique().tolist())
+            selected_locations = st.sidebar.multiselect(
+                "Locations",
+                options=available_locations,
+                default=available_locations,
+                key="cap_locations"
+            )
+
+            if selected_locations:
+                capacity_data = capacity_data[capacity_data['location'].isin(selected_locations)]
+
+            if len(capacity_data) == 0:
+                st.warning("No data matches the selected filters.")
+            else:
+                # Calculate date range string
+                data_min = capacity_data['visit_datetime'].min()
+                data_max = capacity_data['visit_datetime'].max()
+                if data_min.year == data_max.year:
+                    date_range_str = f"{data_min.strftime('%b %d')} - {data_max.strftime('%b %d, %Y')}"
+                else:
+                    date_range_str = f"{data_min.strftime('%b %y')} - {data_max.strftime('%b %y')}"
+
+                st.markdown(f"**Data Range:** {date_range_str}")
+                st.markdown("")
+
+                # Calculate occupancy per location per time period
+                # Group by location and time period
+                period_stats = capacity_data.groupby(['location', 'time_period']).agg({
+                    'participants': 'sum'
+                }).reset_index()
+                period_stats.columns = ['location', 'time_period', 'bookings']
+
+                # Calculate weekday stats (dal + piek combined)
+                weekday_stats = capacity_data[capacity_data['is_weekday']].groupby('location').agg({
+                    'participants': 'sum'
+                }).reset_index()
+                weekday_stats.columns = ['location', 'weekday_bookings']
+
+                # Calculate number of weeks in the data for averaging
+                num_weeks = capacity_data['year_week'].nunique()
+
+                # Create summary table
+                summary_data = []
+                for location in selected_locations:
+                    if location not in LOCATION_CAPACITY:
+                        continue
+
+                    cap = LOCATION_CAPACITY[location]
+                    cluster = cap['cluster']
+
+                    # Get bookings for each period
+                    dal_bookings = period_stats[(period_stats['location'] == location) & (period_stats['time_period'] == 'dal')]['bookings'].sum()
+                    piek_bookings = period_stats[(period_stats['location'] == location) & (period_stats['time_period'] == 'piek')]['bookings'].sum()
+                    weekend_bookings = period_stats[(period_stats['location'] == location) & (period_stats['time_period'] == 'weekend')]['bookings'].sum()
+
+                    weekday_row = weekday_stats[weekday_stats['location'] == location]
+                    weekday_bookings = weekday_row['weekday_bookings'].values[0] if len(weekday_row) > 0 else 0
+
+                    # Calculate weekly averages
+                    dal_weekly = dal_bookings / num_weeks if num_weeks > 0 else 0
+                    piek_weekly = piek_bookings / num_weeks if num_weeks > 0 else 0
+                    weekend_weekly = weekend_bookings / num_weeks if num_weeks > 0 else 0
+                    weekday_weekly = weekday_bookings / num_weeks if num_weeks > 0 else 0
+
+                    # Calculate occupancy percentages
+                    dal_occupancy = (dal_weekly / cap['dal'] * 100) if cap['dal'] > 0 else 0
+                    piek_occupancy = (piek_weekly / cap['piek'] * 100) if cap['piek'] > 0 else 0
+                    weekend_occupancy = (weekend_weekly / cap['weekend'] * 100) if cap['weekend'] > 0 else 0
+                    weekday_occupancy = (weekday_weekly / cap['weekday'] * 100) if cap['weekday'] > 0 else 0
+
+                    summary_data.append({
+                        'Location': location,
+                        'Cluster': cluster,
+                        'Dal uren (%)': round(dal_occupancy),
+                        'Piek uren (%)': round(piek_occupancy),
+                        'Ma-Do (%)': round(weekday_occupancy),
+                        'Weekend (%)': round(weekend_occupancy),
+                        'Dal (weekly avg)': round(dal_weekly),
+                        'Piek (weekly avg)': round(piek_weekly),
+                        'Weekend (weekly avg)': round(weekend_weekly),
+                    })
+
+                summary_df = pd.DataFrame(summary_data)
+
+                if len(summary_df) == 0:
+                    st.warning("No capacity data available for the selected locations.")
+                else:
+                    # Key metrics
+                    st.markdown("### Key Metrics")
+
+                    total_visits = capacity_data['participants'].sum()
+                    avg_dal = summary_df['Dal uren (%)'].mean()
+                    avg_piek = summary_df['Piek uren (%)'].mean()
+                    avg_weekend = summary_df['Weekend (%)'].mean()
+
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric(
+                            "Total Visits",
+                            f"{total_visits:,}",
+                            help="Total number of visitors in the selected period"
+                        )
+                    with col2:
+                        st.metric(
+                            "Avg Dal Occupancy",
+                            f"{avg_dal:.1f}%",
+                            help="Average off-peak (Mon-Thu 10-16) occupancy across locations"
+                        )
+                    with col3:
+                        st.metric(
+                            "Avg Piek Occupancy",
+                            f"{avg_piek:.1f}%",
+                            help="Average peak hour occupancy across locations"
+                        )
+                    with col4:
+                        st.metric(
+                            "Avg Weekend Occupancy",
+                            f"{avg_weekend:.1f}%",
+                            help="Average weekend occupancy across locations"
+                        )
+
+                    st.info(f"**Analysis Period:** {num_weeks} weeks | Occupancy calculated as weekly average bookings / weekly capacity")
+
+                    # Sauna Visit Heatmap
+                    st.markdown("---")
+                    st.markdown("### Sauna Visit Heatmap")
+
+                    st.markdown("""
+                    Visualize visit patterns by day of week and time of day. Darker colors indicate higher visit volumes.
+                    Select a location to see its specific pattern, or choose "All Locations" for aggregate view.
+                    """)
+
+                    # Prepare heatmap data
+                    heatmap_data = capacity_data.copy()
+                    heatmap_data['visit_hour'] = heatmap_data['visit_datetime'].dt.hour
+                    heatmap_data['day_of_week'] = heatmap_data['visit_datetime'].dt.day_name()
+
+                    # Order days of week
+                    day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+                    heatmap_data['day_of_week'] = pd.Categorical(heatmap_data['day_of_week'], categories=day_order, ordered=True)
+
+                    # Location filter dropdown for heatmap
+                    heatmap_location_options = ['All Locations'] + selected_locations
+                    selected_heatmap_location = st.selectbox(
+                        'Select Location',
+                        options=heatmap_location_options,
+                        index=0,
+                        key='cap_heatmap_location_selector'
+                    )
+
+                    # Filter data by selected location
+                    if selected_heatmap_location == 'All Locations':
+                        heatmap_filtered = heatmap_data
+                    else:
+                        heatmap_filtered = heatmap_data[heatmap_data['location'] == selected_heatmap_location]
+
+                    # Group by day and hour
+                    visit_counts = heatmap_filtered.groupby(['day_of_week', 'visit_hour'], observed=True).agg({
+                        'participants': 'sum'
+                    }).reset_index()
+                    visit_counts.columns = ['Day', 'Hour', 'Visits']
+
+                    # Create complete grid (all day/hour combinations)
+                    all_combinations = pd.MultiIndex.from_product(
+                        [day_order, range(24)],
+                        names=['Day', 'Hour']
+                    ).to_frame(index=False)
+
+                    heatmap_grid = all_combinations.merge(visit_counts, on=['Day', 'Hour'], how='left').fillna(0)
+                    heatmap_grid['Visits'] = heatmap_grid['Visits'].astype(int)
+
+                    # Pivot to create heatmap matrix
+                    heatmap_matrix = heatmap_grid.pivot(index='Hour', columns='Day', values='Visits')
+                    heatmap_matrix = heatmap_matrix[day_order]  # Ensure correct day order
+
+                    # Create heatmap
+                    fig_heatmap = go.Figure(data=go.Heatmap(
+                        z=heatmap_matrix.values,
+                        x=day_order,
+                        y=[f"{h:02d}:00" for h in range(24)],
+                        colorscale='Purples',
+                        hovertemplate='%{x}<br>%{y}<br>%{z} visits<extra></extra>',
+                        showscale=True,
+                        colorbar=dict(title='Visits')
+                    ))
+
+                    fig_heatmap.update_layout(
+                        title=f'Visit Heatmap - {selected_heatmap_location}',
+                        xaxis_title='Day of Week',
+                        yaxis_title='Hour of Day',
+                        height=600,
+                        xaxis=dict(side='bottom'),
+                        yaxis=dict(autorange='reversed')  # Hours from top to bottom
+                    )
+
+                    st.plotly_chart(fig_heatmap, use_container_width=True)
+
+                    # Peak time insights
+                    if len(visit_counts) > 0:
+                        peak_row = visit_counts.loc[visit_counts['Visits'].idxmax()]
+                        peak_day = peak_row['Day']
+                        peak_hour = int(peak_row['Hour'])
+                        peak_count = int(peak_row['Visits'])
+
+                        st.info(f"""
+**Peak Time for {selected_heatmap_location}**: {peak_day} at {peak_hour:02d}:00 - {(peak_hour+1):02d}:00 with {peak_count} visits.
+                        """)
+
+                    with st.expander("How to Read the Heatmap"):
+                        st.markdown("""
+**Understanding the Visualization:**
+- **X-axis**: Days of the week (Monday through Sunday)
+- **Y-axis**: Hours of the day (00:00 to 23:00 in 24-hour format)
+- **Color intensity**: Darker purple = more visits, lighter = fewer visits
+- **Hover**: Move your mouse over any cell to see exact visit counts
+
+**Operational Insights:**
+- **Dark clusters** indicate peak times requiring maximum staffing and capacity
+- **Light areas** show off-peak times suitable for maintenance or promotions
+- **Vertical patterns** (dark columns) reveal busy days regardless of time
+- **Horizontal patterns** (dark rows) show popular time slots across the week
+- **Compare locations** using the dropdown to identify unique patterns per branch
+
+**Staffing Strategy:**
+Use this heatmap to optimize your team schedule - ensure adequate coverage during dark (high-traffic) periods and consider reduced staffing during light (low-traffic) times.
+                        """)
+
+                    # Initialize custom targets in session state if not exists
+                    if 'custom_targets' not in st.session_state:
+                        st.session_state.custom_targets = {}
+
+                    # Function to get target for a location/period
+                    def get_target(location, period):
+                        # Check for custom target first
+                        if location in st.session_state.custom_targets:
+                            custom = st.session_state.custom_targets[location].get(period)
+                            if custom is not None and custom > 0:
+                                return custom
+
+                        # Fall back to cluster default
+                        cluster = LOCATION_CAPACITY.get(location, {}).get('cluster', 'Groeier')
+                        cluster_targets = CLUSTER_TARGETS.get(cluster, {'dal': (30, 40), 'piek': (60, 70), 'weekend': (70, 80)})
+                        return cluster_targets[period][0]  # Use lower bound as target
+
+                    # Location comparison table
+                    st.markdown("---")
+                    st.markdown("### Occupancy by Location")
+
+                    # Week selector
+                    available_weeks = sorted(capacity_data['year_week'].unique().tolist())
+                    week_options = ['All weeks (average)'] + available_weeks
+
+                    selected_week = st.selectbox(
+                        "Select Week",
+                        options=week_options,
+                        index=0,
+                        key="cap_week_selector",
+                        help="View occupancy for a specific week or average across all weeks"
+                    )
+
+                    # Filter data if specific week selected and recalculate
+                    if selected_week != 'All weeks (average)':
+                        week_data = capacity_data[capacity_data['year_week'] == selected_week]
+                        num_weeks_display = 1
+
+                        # Recalculate period_stats for selected week
+                        period_stats = week_data.groupby(['location', 'time_period']).agg({
+                            'participants': 'sum'
+                        }).reset_index()
+                        period_stats.columns = ['location', 'time_period', 'bookings']
+
+                        weekday_stats = week_data[week_data['is_weekday']].groupby('location').agg({
+                            'participants': 'sum'
+                        }).reset_index()
+                        weekday_stats.columns = ['location', 'weekday_bookings']
+
+                        # Rebuild summary_df for selected week
+                        summary_data = []
+                        for location in selected_locations:
+                            if location not in LOCATION_CAPACITY:
+                                continue
+
+                            cap = LOCATION_CAPACITY[location]
+                            cluster = cap['cluster']
+
+                            dal_bookings = period_stats[(period_stats['location'] == location) & (period_stats['time_period'] == 'dal')]['bookings'].sum()
+                            piek_bookings = period_stats[(period_stats['location'] == location) & (period_stats['time_period'] == 'piek')]['bookings'].sum()
+                            weekend_bookings = period_stats[(period_stats['location'] == location) & (period_stats['time_period'] == 'weekend')]['bookings'].sum()
+
+                            weekday_row = weekday_stats[weekday_stats['location'] == location]
+                            weekday_bookings = weekday_row['weekday_bookings'].values[0] if len(weekday_row) > 0 else 0
+
+                            dal_occupancy = (dal_bookings / cap['dal'] * 100) if cap['dal'] > 0 else 0
+                            piek_occupancy = (piek_bookings / cap['piek'] * 100) if cap['piek'] > 0 else 0
+                            weekend_occupancy = (weekend_bookings / cap['weekend'] * 100) if cap['weekend'] > 0 else 0
+                            weekday_occupancy = (weekday_bookings / cap['weekday'] * 100) if cap['weekday'] > 0 else 0
+
+                            summary_data.append({
+                                'Location': location,
+                                'Cluster': cluster,
+                                'Dal uren (%)': round(dal_occupancy),
+                                'Piek uren (%)': round(piek_occupancy),
+                                'Ma-Do (%)': round(weekday_occupancy),
+                                'Weekend (%)': round(weekend_occupancy),
+                            })
+
+                        summary_df = pd.DataFrame(summary_data)
+                        st.caption(f"Showing data for week: **{selected_week}**")
+                    else:
+                        st.caption(f"Showing average across **{num_weeks} weeks**")
+
+                    # Build display table with targets
+                    display_data = []
+                    for _, row in summary_df.iterrows():
+                        location = row['Location']
+                        display_data.append({
+                            'Location': location,
+                            'Cluster': row['Cluster'],
+                            'Dal uren (%)': int(row['Dal uren (%)']),
+                            'Dal Target (%)': int(get_target(location, 'dal')),
+                            'Piek uren (%)': int(row['Piek uren (%)']),
+                            'Piek Target (%)': int(get_target(location, 'piek')),
+                            'Weekend (%)': int(row['Weekend (%)']),
+                            'Weekend Target (%)': int(get_target(location, 'weekend')),
+                        })
+
+                    display_df = pd.DataFrame(display_data)
+                    display_df = display_df.sort_values('Weekend (%)', ascending=False)
+
+                    # Color coding function for actual vs target
+                    def color_vs_target(row):
+                        styles = [''] * len(row)
+                        col_pairs = [
+                            ('Dal uren (%)', 'Dal Target (%)'),
+                            ('Piek uren (%)', 'Piek Target (%)'),
+                            ('Weekend (%)', 'Weekend Target (%)')
+                        ]
+                        for actual_col, target_col in col_pairs:
+                            actual = row[actual_col]
+                            target = row[target_col]
+                            idx = row.index.get_loc(actual_col)
+                            if actual >= target:
+                                styles[idx] = 'background-color: #dcfce7'  # Green
+                            elif actual >= target * 0.9:
+                                styles[idx] = 'background-color: #fef3c7'  # Yellow
+                            else:
+                                styles[idx] = 'background-color: #fee2e2'  # Red
+                        return styles
+
+                    styled_df = display_df.style.apply(color_vs_target, axis=1)
+
+                    st.dataframe(styled_df, use_container_width=True, hide_index=True)
+
+                    st.caption("🟢 At/above target · 🟡 Within 10% · 🔴 More than 10% below")
+
+                    # Custom target configuration
+                    with st.expander("Configure Custom Targets per Location", expanded=False):
+                        st.markdown("""
+                        Set custom occupancy targets for each location.
+                        Default targets are based on location cluster (Flagship, Groeier, Onderbenut).
+                        """)
+
+                        # Create columns for the target input form
+                        for location in summary_df['Location'].unique():
+                            cluster = LOCATION_CAPACITY.get(location, {}).get('cluster', 'Unknown')
+                            default_targets = CLUSTER_TARGETS.get(cluster, {'dal': (0, 0), 'piek': (0, 0), 'weekend': (0, 0)})
+
+                            st.markdown(f"**{location}** (Default: {cluster})")
+
+                            col1, col2, col3 = st.columns(3)
+
+                            # Get existing custom values or use defaults
+                            loc_targets = st.session_state.custom_targets.get(location, {})
+
+                            with col1:
+                                dal_default = loc_targets.get('dal', default_targets['dal'][0])
+                                dal_target = st.number_input(
+                                    "Dal uren (%)",
+                                    min_value=0,
+                                    max_value=100,
+                                    value=int(dal_default),
+                                    key=f"target_dal_{location}",
+                                    help=f"Default: {default_targets['dal'][0]}-{default_targets['dal'][1]}%"
+                                )
+
+                            with col2:
+                                piek_default = loc_targets.get('piek', default_targets['piek'][0])
+                                piek_target = st.number_input(
+                                    "Piek uren (%)",
+                                    min_value=0,
+                                    max_value=100,
+                                    value=int(piek_default),
+                                    key=f"target_piek_{location}",
+                                    help=f"Default: {default_targets['piek'][0]}-{default_targets['piek'][1]}%"
+                                )
+
+                            with col3:
+                                weekend_default = loc_targets.get('weekend', default_targets['weekend'][0])
+                                weekend_target = st.number_input(
+                                    "Weekend (%)",
+                                    min_value=0,
+                                    max_value=100,
+                                    value=int(weekend_default),
+                                    key=f"target_weekend_{location}",
+                                    help=f"Default: {default_targets['weekend'][0]}-{default_targets['weekend'][1]}%"
+                                )
+
+                            # Store custom targets
+                            st.session_state.custom_targets[location] = {
+                                'dal': dal_target,
+                                'piek': piek_target,
+                                'weekend': weekend_target
+                            }
+
+                            st.markdown("---")
+
+                        # Reset to defaults button
+                        if st.button("Reset All to Cluster Defaults", key="reset_targets"):
+                            st.session_state.custom_targets = {}
+                            st.rerun()
+
+                    # Weekly trend chart
+                    st.markdown("---")
+                    st.markdown("### Weekly Trend")
+
+                    # Calculate weekly occupancy
+                    weekly_data = capacity_data.groupby(['year_week', 'location', 'time_period']).agg({
+                        'participants': 'sum'
+                    }).reset_index()
+
+                    # Pivot to get periods as columns
+                    weekly_pivot = weekly_data.pivot_table(
+                        index=['year_week', 'location'],
+                        columns='time_period',
+                        values='participants',
+                        fill_value=0
+                    ).reset_index()
+
+                    # Calculate occupancy for each week
+                    trend_data = []
+                    for _, row in weekly_pivot.iterrows():
+                        location = row['location']
+                        if location not in LOCATION_CAPACITY:
+                            continue
+                        cap = LOCATION_CAPACITY[location]
+
+                        dal_occ = (row.get('dal', 0) / cap['dal'] * 100) if cap['dal'] > 0 else 0
+                        piek_occ = (row.get('piek', 0) / cap['piek'] * 100) if cap['piek'] > 0 else 0
+                        weekend_occ = (row.get('weekend', 0) / cap['weekend'] * 100) if cap['weekend'] > 0 else 0
+
+                        trend_data.append({
+                            'Week': row['year_week'],
+                            'Location': location,
+                            'Dal (%)': dal_occ,
+                            'Piek (%)': piek_occ,
+                            'Weekend (%)': weekend_occ
+                        })
+
+                    trend_df = pd.DataFrame(trend_data)
+
+                    if len(trend_df) > 0:
+                        # Location selector for trend
+                        trend_location = st.selectbox(
+                            "Select Location for Trend",
+                            options=['All Locations (Average)'] + list(summary_df['Location'].unique()),
+                            key="trend_location"
+                        )
+
+                        if trend_location == 'All Locations (Average)':
+                            trend_plot = trend_df.groupby('Week')[['Dal (%)', 'Piek (%)', 'Weekend (%)']].mean().reset_index()
+                        else:
+                            trend_plot = trend_df[trend_df['Location'] == trend_location][['Week', 'Dal (%)', 'Piek (%)', 'Weekend (%)']]
+
+                        # Melt for plotting
+                        trend_melted = trend_plot.melt(id_vars=['Week'], var_name='Period', value_name='Occupancy (%)')
+
+                        fig_trend = px.line(
+                            trend_melted,
+                            x='Week',
+                            y='Occupancy (%)',
+                            color='Period',
+                            title=f'Weekly Occupancy Trend - {trend_location}',
+                            markers=True
+                        )
+
+                        fig_trend.update_layout(
+                            height=400,
+                            yaxis=dict(range=[0, 100]),
+                            xaxis_tickangle=-45
+                        )
+
+                        st.plotly_chart(fig_trend, use_container_width=True)
+
+                    # Explanation
+                    st.markdown("---")
+                    with st.expander("Understanding the Metrics"):
+                        st.markdown("""
+                        ### Time Periods
+                        - **Dal uren (Ma/Do 10:00-16:00)**: Off-peak hours on weekdays. Lower traffic, opportunity for promotions.
+                        - **Piek uren (al het overige)**: Peak hours on weekdays (before 10:00 and after 16:00). Higher demand.
+                        - **Weekend (vrij/za/zo)**: All hours on Friday, Saturday, and Sunday. Typically highest demand.
+                        - **Ma-Do**: Combined Monday-Thursday view (dal + piek together).
+
+                        ### Capacity
+                        Weekly capacity is based on the number of available seats per time period:
+                        - Capacity varies by location and time period
+                        - Occupancy % = (Weekly bookings / Weekly capacity) × 100
+
+                        ### Cluster Targets
+                        Locations are grouped into clusters with different performance targets:
+                        - **Flagship** (K1, K8): Highest targets (75-80% overall, 90-95% weekend)
+                        - **Groeier** (Growth): Medium targets (60-65% overall, 80-85% weekend)
+                        - **Onderbenut** (Underutilized): Lower targets with growth potential (50-55% overall)
+
+                        ### Strategic Insights
+                        - Focus marketing on dal uren to improve off-peak utilization
+                        - Weekend capacity is typically well-utilized - consider price optimization
+                        - Compare locations within the same cluster for fair benchmarking
+                        """)
+
+    # Reset button
+    st.sidebar.markdown("---")
+    if st.sidebar.button("Clear All & Start Over", key="cap_reset"):
+        st.session_state.df1 = None
+        st.session_state.df2 = None
+        st.rerun()
