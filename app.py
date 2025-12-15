@@ -31,6 +31,9 @@ with col2:
     st.title("Kuuma Booking Analyzer")
     st.markdown("**Customer insights & booking intelligence**")
 
+# Reserve container for date range selector (filled after data loads)
+date_range_container = st.container()
+
 # Initialize session state
 if 'df1' not in st.session_state:
     st.session_state.df1 = None
@@ -53,42 +56,85 @@ def load_excel_file(uploaded_file):
     except Exception as e:
         return None, str(e)
 
+def load_and_merge_files(uploaded_files):
+    """Load multiple Excel files and merge them into one dataframe."""
+    if not uploaded_files:
+        return None, None, []
+
+    dfs = []
+    file_info = []
+    errors = []
+
+    for uploaded_file in uploaded_files:
+        df, error = load_excel_file(uploaded_file)
+        if error:
+            errors.append(f"{uploaded_file.name}: {error}")
+        elif df is not None:
+            dfs.append(df)
+            file_info.append(f"{uploaded_file.name} ({len(df):,} rows)")
+
+    if errors:
+        return None, errors, []
+
+    if not dfs:
+        return None, None, []
+
+    # Merge all dataframes
+    merged_df = pd.concat(dfs, ignore_index=True)
+    return merged_df, None, file_info
+
 # Reserve container for navigation at top of sidebar
 nav_container = st.sidebar.container()
 
 # Sidebar - Upload section
 st.sidebar.header("Upload & Configure")
 
-# File uploaders
-uploaded_file1 = st.sidebar.file_uploader(
+# File uploaders with multiple file support
+uploaded_files1 = st.sidebar.file_uploader(
     "Booking Creation Dates (.xls/.xlsx)",
     type=["xls", "xlsx"],
-    help="Upload the file containing when bookings were created"
+    help="Upload files containing when bookings were created. You can select multiple files from different Bookeo instances.",
+    accept_multiple_files=True
 )
 
-uploaded_file2 = st.sidebar.file_uploader(
+uploaded_files2 = st.sidebar.file_uploader(
     "Visit Dates (.xls/.xlsx)",
     type=["xls", "xlsx"],
-    help="Upload the file containing when customers actually visited"
+    help="Upload files containing when customers actually visited. You can select multiple files from different Bookeo instances.",
+    accept_multiple_files=True
 )
 
-# Load File 1
-if uploaded_file1 is not None:
-    df1, error1 = load_excel_file(uploaded_file1)
-    if error1:
-        st.sidebar.error(f"Error reading File 1: {error1}")
-    else:
+# Load and merge File 1 (Booking Creation Dates)
+if uploaded_files1:
+    df1, errors1, file_info1 = load_and_merge_files(uploaded_files1)
+    if errors1:
+        for error in errors1:
+            st.sidebar.error(f"Error: {error}")
+    elif df1 is not None:
         st.session_state.df1 = df1
-        st.sidebar.success(f"File 1 loaded: {len(df1):,} rows")
+        if len(file_info1) == 1:
+            st.sidebar.success(f"Loaded: {len(df1):,} rows")
+        else:
+            st.sidebar.success(f"Merged {len(file_info1)} files: {len(df1):,} total rows")
+            with st.sidebar.expander("File details"):
+                for info in file_info1:
+                    st.write(f"- {info}")
 
-# Load File 2
-if uploaded_file2 is not None:
-    df2, error2 = load_excel_file(uploaded_file2)
-    if error2:
-        st.sidebar.error(f"Error reading File 2: {error2}")
-    else:
+# Load and merge File 2 (Visit Dates)
+if uploaded_files2:
+    df2, errors2, file_info2 = load_and_merge_files(uploaded_files2)
+    if errors2:
+        for error in errors2:
+            st.sidebar.error(f"Error: {error}")
+    elif df2 is not None:
         st.session_state.df2 = df2
-        st.sidebar.success(f"File 2 loaded: {len(df2):,} rows")
+        if len(file_info2) == 1:
+            st.sidebar.success(f"Loaded: {len(df2):,} rows")
+        else:
+            st.sidebar.success(f"Merged {len(file_info2)} files: {len(df2):,} total rows")
+            with st.sidebar.expander("File details"):
+                for info in file_info2:
+                    st.write(f"- {info}")
 
 # Fill navigation container (now that files are loaded)
 if st.session_state.df1 is not None and st.session_state.df2 is not None:
@@ -337,21 +383,25 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
     if len(processed_data) == 0:
         st.error("No matching booking IDs found between files. Please check your column selections.")
     else:
-        # Filters section
-        st.sidebar.markdown("---")
-        st.sidebar.subheader("Filters")
-
-        # Date range filter
+        # Date range selector in reserved container (under header)
         min_date = processed_data['visit_date'].min().date()
         max_date = processed_data['visit_date'].max().date()
 
-        date_range = st.sidebar.date_input(
-            "Visit Date Range",
-            value=(min_date, max_date),
-            min_value=min_date,
-            max_value=max_date,
-            help="Filter bookings by visit date"
-        )
+        with date_range_container:
+            date_col1, date_col2 = st.columns([2, 4])
+            with date_col1:
+                date_range = st.date_input(
+                    "Date Range (Visit Date)",
+                    value=(min_date, max_date),
+                    min_value=min_date,
+                    max_value=max_date,
+                    help="Filter bookings by visit date",
+                    key="main_date_range"
+                )
+
+        # Location filter in sidebar
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("Filters")
 
         # Location filter (if location column selected)
         if location_col != "None":
@@ -394,19 +444,6 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
             median_interval = filtered_data['interval_days'].median()
             total_bookings = len(filtered_data)
             same_day_pct = (filtered_data['interval_days'] == 0).sum() / total_bookings * 100
-
-            # Calculate date range
-            min_booking_date = filtered_data['booking_date'].min()
-            max_booking_date = filtered_data['booking_date'].max()
-            # Use compact format: if same year, show year only once
-            if min_booking_date.year == max_booking_date.year:
-                date_range_str = f"{min_booking_date.strftime('%b %d')} - {max_booking_date.strftime('%b %d, %Y')}"
-            else:
-                date_range_str = f"{min_booking_date.strftime('%b %y')} - {max_booking_date.strftime('%b %y')}"
-
-            # Display data range
-            st.markdown(f"**Data Range:** {date_range_str}")
-            st.markdown("")
 
             # Display metrics
             st.markdown("### Key Metrics")
@@ -495,20 +532,20 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
             if location_col != "None" and len(selected_locations) > 0:
                 st.markdown("### Breakdown by Location")
 
-                st.markdown("""
-                Compare booking behavior across different locations.
+                st.markdown("Compare booking behavior across different locations.")
 
-                **Understanding Average vs Median:**
-                - **Average** - Includes all bookings, including customers who book far in advance (e.g., 30 days ahead)
-                - **Median** - Shows what a typical customer actually does, ignoring extreme values
+                with st.expander("Understanding Average vs Median"):
+                    st.markdown("""
+                    - **Average** - Includes all bookings, including customers who book far in advance (e.g., 30 days ahead)
+                    - **Median** - Shows what a typical customer actually does, ignoring extreme values
 
-                **Example:** If most customers book 0-2 days ahead, but a few book 30 days ahead:
-                - Average might be 5 days (pulled up by advance planners)
-                - Median would be 1 day (the typical customer)
+                    **Example:** If most customers book 0-2 days ahead, but a few book 30 days ahead:
+                    - Average might be 5 days (pulled up by advance planners)
+                    - Median would be 1 day (the typical customer)
 
-                **What to look for:** A large gap between Average and Median means you have mostly last-minute bookers
-                with some advance planners. A small gap means consistent booking behavior.
-                """)
+                    **What to look for:** A large gap between Average and Median means you have mostly last-minute bookers
+                    with some advance planners. A small gap means consistent booking behavior.
+                    """)
 
                 location_stats = filtered_data.groupby('location').agg({
                     'booking_id': 'count',
@@ -525,116 +562,6 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
                     'Median Lead Time (days)': st.column_config.NumberColumn('Median Lead Time (days)', help='Typical days between booking and visit (ignoring outliers)'),
                 }
                 st.dataframe(location_stats, use_container_width=True, column_config=location_stats_config)
-
-                # Sauna Visit Time Analysis (Day of Week & Time of Day)
-                # Check if we have time data (not just dates)
-                if (filtered_data['visit_date'].dt.hour.max() > 0 or
-                    filtered_data['visit_date'].dt.minute.max() > 0):
-
-                    st.markdown("---")
-                    st.markdown("### Sauna Visit Heatmap")
-
-                    st.markdown("""
-                    Visualize visit patterns by day of week and time of day. Darker colors indicate higher visit volumes.
-                    Select a location to see its specific pattern, or choose "All Locations" for aggregate view.
-                    """)
-
-                    # Prepare data
-                    time_data = filtered_data.copy()
-                    time_data['visit_hour'] = time_data['visit_date'].dt.hour
-                    time_data['day_of_week'] = time_data['visit_date'].dt.day_name()
-
-                    # Order days of week
-                    day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-                    time_data['day_of_week'] = pd.Categorical(time_data['day_of_week'], categories=day_order, ordered=True)
-
-                    # Location filter dropdown
-                    available_locations = sorted(time_data['location'].unique().tolist())
-                    location_options = ['All Locations'] + available_locations
-
-                    selected_heatmap_location = st.selectbox(
-                        'Select Location',
-                        options=location_options,
-                        index=0,
-                        key='heatmap_location_selector'
-                    )
-
-                    # Filter data by selected location
-                    if selected_heatmap_location == 'All Locations':
-                        heatmap_data = time_data
-                    else:
-                        heatmap_data = time_data[time_data['location'] == selected_heatmap_location]
-
-                    # Group by day and hour
-                    visit_counts = heatmap_data.groupby(['day_of_week', 'visit_hour'], observed=True).agg({
-                        'booking_id': 'count'
-                    }).reset_index()
-                    visit_counts.columns = ['Day', 'Hour', 'Visits']
-
-                    # Create complete grid (all day/hour combinations)
-                    all_combinations = pd.MultiIndex.from_product(
-                        [day_order, range(24)],
-                        names=['Day', 'Hour']
-                    ).to_frame(index=False)
-
-                    heatmap_grid = all_combinations.merge(visit_counts, on=['Day', 'Hour'], how='left').fillna(0)
-                    heatmap_grid['Visits'] = heatmap_grid['Visits'].astype(int)
-
-                    # Pivot to create heatmap matrix
-                    heatmap_matrix = heatmap_grid.pivot(index='Hour', columns='Day', values='Visits')
-                    heatmap_matrix = heatmap_matrix[day_order]  # Ensure correct day order
-
-                    # Create heatmap
-                    fig_heatmap = go.Figure(data=go.Heatmap(
-                        z=heatmap_matrix.values,
-                        x=day_order,
-                        y=[f"{h:02d}:00" for h in range(24)],
-                        colorscale='Purples',
-                        hovertemplate='%{x}<br>%{y}<br>%{z} visits<extra></extra>',
-                        showscale=True,
-                        colorbar=dict(title='Visits')
-                    ))
-
-                    fig_heatmap.update_layout(
-                        title=f'Visit Heatmap - {selected_heatmap_location}',
-                        xaxis_title='Day of Week',
-                        yaxis_title='Hour of Day',
-                        height=600,
-                        xaxis=dict(side='bottom'),
-                        yaxis=dict(autorange='reversed')  # Hours from top to bottom
-                    )
-
-                    st.plotly_chart(fig_heatmap, use_container_width=True)
-
-                    # Peak time insights
-                    if len(visit_counts) > 0:
-                        peak_row = visit_counts.loc[visit_counts['Visits'].idxmax()]
-                        peak_day = peak_row['Day']
-                        peak_hour = int(peak_row['Hour'])
-                        peak_count = int(peak_row['Visits'])
-
-                        st.info(f"""
-**Peak Time for {selected_heatmap_location}**: {peak_day} at {peak_hour:02d}:00 - {(peak_hour+1):02d}:00 with {peak_count} visits.
-                        """)
-
-                    with st.expander("How to Read the Heatmap"):
-                        st.markdown("""
-**Understanding the Visualization:**
-- **X-axis**: Days of the week (Monday through Sunday)
-- **Y-axis**: Hours of the day (00:00 to 23:00 in 24-hour format)
-- **Color intensity**: Darker purple = more visits, lighter = fewer visits
-- **Hover**: Move your mouse over any cell to see exact visit counts
-
-**Operational Insights:**
-- **Dark clusters** indicate peak times requiring maximum staffing and capacity
-- **Light areas** show off-peak times suitable for maintenance or promotions
-- **Vertical patterns** (dark columns) reveal busy days regardless of time
-- **Horizontal patterns** (dark rows) show popular time slots across the week
-- **Compare locations** using the dropdown to identify unique patterns per branch
-
-**Staffing Strategy:**
-Use this heatmap to optimize your team schedule - ensure adequate coverage during dark (high-traffic) periods and consider reduced staffing during light (low-traffic) times.
-                        """)
 
             # Temperature Analysis
             if show_temperature:
@@ -736,6 +663,19 @@ Use this heatmap to optimize your team schedule - ensure adequate coverage durin
 
                     st.plotly_chart(fig_temp, use_container_width=True)
 
+                    with st.expander("How to read the bubble plot"):
+                        st.markdown("""
+- **Horizontal position** (X-axis): Average temperature when booking was made
+- **Vertical position** (Y-axis): How far in advance customers book
+- **Bubble size**: Share of total bookings (larger = more bookings)
+- **Pattern**: Warmer weather typically correlates with more advance planning
+
+**Interpretation:**
+- **Large bubbles high on chart**: Popular temperature range where customers plan ahead
+- **Large bubbles low on chart**: Popular temperature range with spontaneous bookings
+- **Small bubbles**: Temperature ranges with less sauna demand
+                        """)
+
                     # Temperature statistics table
                     st.markdown("#### Temperature Breakdown")
 
@@ -776,20 +716,6 @@ Use this heatmap to optimize your team schedule - ensure adequate coverage durin
                         'Median Lead Time': st.column_config.NumberColumn('Median Lead Time', help='Typical days between booking and visit'),
                     }
                     st.dataframe(temp_stats, use_container_width=True, column_config=temp_stats_config)
-
-                    # Insights
-                    st.info("""
-                    **How to read the bubble plot:**
-                    - **Horizontal position** (X-axis): Average temperature when booking was made
-                    - **Vertical position** (Y-axis): How far in advance customers book
-                    - **Bubble size**: Share of total bookings (larger = more bookings)
-                    - **Pattern**: Warmer weather typically correlates with more advance planning
-
-                    **Interpretation:**
-                    - **Large bubbles high on chart**: Popular temperature range where customers plan ahead
-                    - **Large bubbles low on chart**: Popular temperature range with spontaneous bookings
-                    - **Small bubbles**: Temperature ranges with less sauna demand
-                    """)
 
             # Export functionality
             st.sidebar.markdown("---")
@@ -854,7 +780,6 @@ else:
 
     3. **Analyze booking patterns**:
        - **Booking Intervals**: Average and median lead times, same-day booking rates, distribution charts
-       - **Visit Time Heatmap**: Day-of-week x hour-of-day patterns to optimize staffing and operations
        - **Location Performance**: Compare booking behavior and capacity across locations
        - **Temperature Impact**: Optional analysis showing how weather affects booking advance planning
 

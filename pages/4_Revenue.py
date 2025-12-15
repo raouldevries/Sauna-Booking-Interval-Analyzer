@@ -34,6 +34,9 @@ with col2:
     st.title("Kuuma Booking Analyzer")
     st.markdown("**Customer insights & booking intelligence**")
 
+# Reserve container for date range selector (filled after data loads)
+date_range_container = st.container()
+
 st.markdown("## Revenue & Value Analysis")
 st.markdown("Revenue trends, promotion effectiveness, and customer lifetime value")
 
@@ -55,28 +58,59 @@ def load_excel_file(uploaded_file):
     except Exception as e:
         return None, str(e)
 
+def load_and_merge_files(uploaded_files):
+    """Load multiple Excel files and merge them into one dataframe."""
+    if not uploaded_files:
+        return None, None, []
+
+    dfs = []
+    file_info = []
+    errors = []
+
+    for uploaded_file in uploaded_files:
+        df, error = load_excel_file(uploaded_file)
+        if error:
+            errors.append(f"{uploaded_file.name}: {error}")
+        elif df is not None:
+            dfs.append(df)
+            file_info.append(f"{uploaded_file.name} ({len(df):,} rows)")
+
+    if errors:
+        return None, errors, []
+
+    if not dfs:
+        return None, None, []
+
+    merged_df = pd.concat(dfs, ignore_index=True)
+    return merged_df, None, file_info
+
 # Reserve container for navigation at top of sidebar
 nav_container = st.sidebar.container()
 
 # Sidebar - Upload section
 st.sidebar.header("Upload & Configure")
 
-# File uploader - only need Booking Creation Dates for this page
-uploaded_file1 = st.sidebar.file_uploader(
+# File uploader with multiple file support
+uploaded_files1 = st.sidebar.file_uploader(
     "Booking Creation Dates (.xls/.xlsx)",
     type=["xls", "xlsx"],
-    help="Upload the file containing booking data with revenue information",
-    key="rev_file1"
+    help="Upload files containing booking data with revenue information. You can select multiple files from different Bookeo instances.",
+    key="rev_file1",
+    accept_multiple_files=True
 )
 
-# Load File
-if uploaded_file1 is not None:
-    df1, error1 = load_excel_file(uploaded_file1)
-    if error1:
-        st.sidebar.error(f"Error reading file: {error1}")
-    else:
+# Load and merge Files
+if uploaded_files1:
+    df1, errors1, file_info1 = load_and_merge_files(uploaded_files1)
+    if errors1:
+        for error in errors1:
+            st.sidebar.error(f"Error: {error}")
+    elif df1 is not None:
         st.session_state.df1 = df1
-        st.sidebar.success(f"File loaded: {len(df1):,} rows")
+        if len(file_info1) == 1:
+            st.sidebar.success(f"Loaded: {len(df1):,} rows")
+        else:
+            st.sidebar.success(f"Merged {len(file_info1)} files: {len(df1):,} total rows")
 
 # Fill navigation container (now that file is loaded)
 if st.session_state.df1 is not None:
@@ -207,6 +241,30 @@ else:
         if len(processed_data) == 0:
             st.error("No valid booking data found.")
         else:
+            # Date range selector in reserved container (under header)
+            min_date = processed_data['booking_date'].min().date()
+            max_date = processed_data['booking_date'].max().date()
+
+            with date_range_container:
+                date_col1, date_col2 = st.columns([2, 4])
+                with date_col1:
+                    date_range = st.date_input(
+                        "Date Range (Booking Date)",
+                        value=(min_date, max_date),
+                        min_value=min_date,
+                        max_value=max_date,
+                        help="Filter revenue by booking date",
+                        key="rev_date_range"
+                    )
+
+            # Apply date filter
+            if len(date_range) == 2:
+                start_date, end_date = date_range
+                processed_data = processed_data[
+                    (processed_data['booking_date'].dt.date >= start_date) &
+                    (processed_data['booking_date'].dt.date <= end_date)
+                ]
+
             # ==================== REVENUE ANALYSIS ====================
             st.markdown("### Revenue Analysis")
 
@@ -254,20 +312,14 @@ else:
                 location_revenue['% of Revenue'] = (location_revenue['Total Revenue'] / total_revenue * 100).round(1)
                 location_revenue = location_revenue[['Total Revenue', '% of Revenue', 'Bookings', 'Avg Booking', 'Median Booking']]
 
-                # Format currency
-                location_display = location_revenue.copy()
-                location_display['Total Revenue'] = location_display['Total Revenue'].apply(lambda x: f"€{x:,.0f}")
-                location_display['Avg Booking'] = location_display['Avg Booking'].apply(lambda x: f"€{x:.2f}")
-                location_display['Median Booking'] = location_display['Median Booking'].apply(lambda x: f"€{x:.2f}")
-
                 revenue_loc_config = {
-                    'Total Revenue': st.column_config.TextColumn('Total Revenue', help='Sum of all booking revenue'),
+                    'Total Revenue': st.column_config.NumberColumn('Total Revenue', help='Sum of all booking revenue', format="€%.0f"),
                     '% of Revenue': st.column_config.NumberColumn('% of Revenue', help='Share of total company revenue'),
                     'Bookings': st.column_config.NumberColumn('Bookings', help='Number of bookings'),
-                    'Avg Booking': st.column_config.TextColumn('Avg Booking', help='Average revenue per booking'),
-                    'Median Booking': st.column_config.TextColumn('Median Booking', help='Typical booking value (ignoring outliers)'),
+                    'Avg Booking': st.column_config.NumberColumn('Avg Booking', help='Average revenue per booking', format="€%.2f"),
+                    'Median Booking': st.column_config.NumberColumn('Median Booking', help='Typical booking value (ignoring outliers)', format="€%.2f"),
                 }
-                st.dataframe(location_display, use_container_width=True, column_config=revenue_loc_config)
+                st.dataframe(location_revenue, use_container_width=True, column_config=revenue_loc_config)
 
                 # Revenue chart
                 fig_rev_loc = px.bar(
@@ -852,9 +904,8 @@ else:
                     highest_seg = segment_clv_df.loc[segment_clv_df['CLV'].idxmax()]
                     lowest_churn_seg = segment_clv_df.loc[segment_clv_df['Churn Rate'].idxmin()]
 
-                    st.info(f"""
-**CLV Insights:**
-
+                    with st.expander("CLV Insights"):
+                        st.markdown(f"""
 - **Overall CLV:** €{clv:.2f} per customer
 - **Highest Value Segment:** {highest_seg['Segment']} with €{highest_seg['CLV']:.2f} CLV
 - **Most Loyal Segment:** {lowest_churn_seg['Segment']} with {lowest_churn_seg['Retention Rate']:.1%} retention rate
@@ -865,7 +916,7 @@ else:
 - **Regulars ({segment_clv_df[segment_clv_df['Segment']=='Regular']['Customers'].values[0] if 'Regular' in segment_clv_df['Segment'].values else 0} customers):** Upgrade campaigns to VIP status
 - **New ({segment_clv_df[segment_clv_df['Segment']=='New']['Customers'].values[0] if 'New' in segment_clv_df['Segment'].values else 0} customers):** Second-visit incentives (critical for retention)
 - **Likely Churned ({churned_count:,} customers):** Win-back campaigns, special offers
-                    """)
+                        """)
 
     # Reset button
     st.sidebar.markdown("---")

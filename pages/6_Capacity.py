@@ -50,6 +50,9 @@ with col2:
     st.title("Kuuma Booking Analyzer")
     st.markdown("**Customer insights & booking intelligence**")
 
+# Reserve container for date range selector (filled after data loads)
+date_range_container = st.container()
+
 st.markdown("## Capacity Analysis")
 st.markdown("Occupancy rates and utilization per location and time period")
 
@@ -72,6 +75,32 @@ def load_excel_file(uploaded_file):
         return df, None
     except Exception as e:
         return None, str(e)
+
+def load_and_merge_files(uploaded_files):
+    """Load multiple Excel files and merge them into one dataframe."""
+    if not uploaded_files:
+        return None, None, []
+
+    dfs = []
+    file_info = []
+    errors = []
+
+    for uploaded_file in uploaded_files:
+        df, error = load_excel_file(uploaded_file)
+        if error:
+            errors.append(f"{uploaded_file.name}: {error}")
+        elif df is not None:
+            dfs.append(df)
+            file_info.append(f"{uploaded_file.name} ({len(df):,} rows)")
+
+    if errors:
+        return None, errors, []
+
+    if not dfs:
+        return None, None, []
+
+    merged_df = pd.concat(dfs, ignore_index=True)
+    return merged_df, None, file_info
 
 # Time period classification
 def classify_time_period(dt):
@@ -100,38 +129,48 @@ nav_container = st.sidebar.container()
 # Sidebar - Upload section
 st.sidebar.header("Upload & Configure")
 
-# File uploaders
-uploaded_file1 = st.sidebar.file_uploader(
+# File uploaders with multiple file support
+uploaded_files1 = st.sidebar.file_uploader(
     "Booking Creation Dates (.xls/.xlsx)",
     type=["xls", "xlsx"],
-    help="Upload the file containing when bookings were created",
-    key="cap_file1"
+    help="Upload files containing when bookings were created. You can select multiple files from different Bookeo instances.",
+    key="cap_file1",
+    accept_multiple_files=True
 )
 
-uploaded_file2 = st.sidebar.file_uploader(
+uploaded_files2 = st.sidebar.file_uploader(
     "Visit Dates (.xls/.xlsx)",
     type=["xls", "xlsx"],
-    help="Upload the file containing when customers actually visited",
-    key="cap_file2"
+    help="Upload files containing when customers actually visited. You can select multiple files from different Bookeo instances.",
+    key="cap_file2",
+    accept_multiple_files=True
 )
 
-# Load File 1
-if uploaded_file1 is not None:
-    df1, error1 = load_excel_file(uploaded_file1)
-    if error1:
-        st.sidebar.error(f"Error reading File 1: {error1}")
-    else:
+# Load and merge File 1
+if uploaded_files1:
+    df1, errors1, file_info1 = load_and_merge_files(uploaded_files1)
+    if errors1:
+        for error in errors1:
+            st.sidebar.error(f"Error: {error}")
+    elif df1 is not None:
         st.session_state.df1 = df1
-        st.sidebar.success(f"File 1 loaded: {len(df1):,} rows")
+        if len(file_info1) == 1:
+            st.sidebar.success(f"Loaded: {len(df1):,} rows")
+        else:
+            st.sidebar.success(f"Merged {len(file_info1)} files: {len(df1):,} total rows")
 
-# Load File 2
-if uploaded_file2 is not None:
-    df2, error2 = load_excel_file(uploaded_file2)
-    if error2:
-        st.sidebar.error(f"Error reading File 2: {error2}")
-    else:
+# Load and merge File 2
+if uploaded_files2:
+    df2, errors2, file_info2 = load_and_merge_files(uploaded_files2)
+    if errors2:
+        for error in errors2:
+            st.sidebar.error(f"Error: {error}")
+    elif df2 is not None:
         st.session_state.df2 = df2
-        st.sidebar.success(f"File 2 loaded: {len(df2):,} rows")
+        if len(file_info2) == 1:
+            st.sidebar.success(f"Loaded: {len(df2):,} rows")
+        else:
+            st.sidebar.success(f"Merged {len(file_info2)} files: {len(df2):,} total rows")
 
 # Fill navigation container (now that files are loaded)
 if st.session_state.df1 is not None and st.session_state.df2 is not None:
@@ -253,20 +292,21 @@ else:
             capacity_data['year'] = capacity_data['visit_datetime'].dt.year
             capacity_data['year_week'] = capacity_data['year'].astype(str) + '-W' + capacity_data['week'].astype(str).str.zfill(2)
 
-            # Date range filter
-            st.sidebar.markdown("---")
-            st.sidebar.subheader("Filters")
-
+            # Date range selector in reserved container (under header)
             min_date = capacity_data['visit_datetime'].min().date()
             max_date = capacity_data['visit_datetime'].max().date()
 
-            date_range = st.sidebar.date_input(
-                "Date Range",
-                value=(min_date, max_date),
-                min_value=min_date,
-                max_value=max_date,
-                key="cap_date_range"
-            )
+            with date_range_container:
+                date_col1, date_col2 = st.columns([2, 4])
+                with date_col1:
+                    date_range = st.date_input(
+                        "Date Range (Visit Date)",
+                        value=(min_date, max_date),
+                        min_value=min_date,
+                        max_value=max_date,
+                        help="Filter capacity data by visit date",
+                        key="cap_date_range"
+                    )
 
             # Apply date filter
             if len(date_range) == 2:
@@ -276,7 +316,10 @@ else:
                     (capacity_data['visit_datetime'].dt.date <= end_date)
                 ]
 
-            # Location filter
+            # Location filter in sidebar
+            st.sidebar.markdown("---")
+            st.sidebar.subheader("Filters")
+
             available_locations = sorted(capacity_data['location'].unique().tolist())
             selected_locations = st.sidebar.multiselect(
                 "Locations",

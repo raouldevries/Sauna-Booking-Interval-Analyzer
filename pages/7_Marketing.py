@@ -417,37 +417,65 @@ if st.session_state.df1 is not None:
 
 # Manual upload option (in expander)
 with st.sidebar.expander("Upload different files"):
-    # Google Ads uploader
-    uploaded_google = st.file_uploader(
+    # Google Ads uploader (multiple files)
+    uploaded_google_files = st.file_uploader(
         "Google Ads CSV",
         type=["csv"],
-        help="Export from Google Ads campaign report",
-        key="google_ads_file"
+        help="Export from Google Ads campaign report. You can select multiple files.",
+        key="google_ads_file",
+        accept_multiple_files=True
     )
 
-    if uploaded_google is not None:
-        df, error = parse_google_ads_csv(uploaded_google)
-        if error:
-            st.error(f"Google Ads error: {error}")
-        else:
-            st.session_state.google_ads_df = df
-            st.success(f"Google Ads loaded: {len(df)} campaigns")
+    if uploaded_google_files:
+        dfs = []
+        errors = []
+        for uploaded_file in uploaded_google_files:
+            df, error = parse_google_ads_csv(uploaded_file)
+            if error:
+                errors.append(f"{uploaded_file.name}: {error}")
+            elif df is not None:
+                dfs.append(df)
 
-    # Meta Ads uploader
-    uploaded_meta = st.file_uploader(
+        if errors:
+            for error in errors:
+                st.error(f"Google Ads error: {error}")
+        elif dfs:
+            merged_df = pd.concat(dfs, ignore_index=True)
+            st.session_state.google_ads_df = merged_df
+            if len(dfs) == 1:
+                st.success(f"Google Ads loaded: {len(merged_df)} campaigns")
+            else:
+                st.success(f"Google Ads merged {len(dfs)} files: {len(merged_df)} campaigns")
+
+    # Meta Ads uploader (multiple files)
+    uploaded_meta_files = st.file_uploader(
         "Meta Ads CSV",
         type=["csv"],
-        help="Export from Meta Ads Manager",
-        key="meta_ads_file"
+        help="Export from Meta Ads Manager. You can select multiple files.",
+        key="meta_ads_file",
+        accept_multiple_files=True
     )
 
-    if uploaded_meta is not None:
-        df, error = parse_meta_ads_csv(uploaded_meta)
-        if error:
-            st.error(f"Meta Ads error: {error}")
-        else:
-            st.session_state.meta_ads_df = df
-            st.success(f"Meta Ads loaded: {len(df)} campaigns")
+    if uploaded_meta_files:
+        dfs = []
+        errors = []
+        for uploaded_file in uploaded_meta_files:
+            df, error = parse_meta_ads_csv(uploaded_file)
+            if error:
+                errors.append(f"{uploaded_file.name}: {error}")
+            elif df is not None:
+                dfs.append(df)
+
+        if errors:
+            for error in errors:
+                st.error(f"Meta Ads error: {error}")
+        elif dfs:
+            merged_df = pd.concat(dfs, ignore_index=True)
+            st.session_state.meta_ads_df = merged_df
+            if len(dfs) == 1:
+                st.success(f"Meta Ads loaded: {len(merged_df)} campaigns")
+            else:
+                st.success(f"Meta Ads merged {len(dfs)} files: {len(merged_df)} campaigns")
 
 # Fill navigation container
 if st.session_state.df2 is not None or st.session_state.google_ads_df is not None or st.session_state.meta_ads_df is not None:

@@ -34,6 +34,9 @@ with col2:
     st.title("Kuuma Booking Analyzer")
     st.markdown("**Customer insights & booking intelligence**")
 
+# Reserve container for date range selector (filled after data loads)
+date_range_container = st.container()
+
 st.markdown("## Recurring Customer Analysis")
 st.markdown("Customer segmentation, loyalty tiers, and retention insights")
 
@@ -57,44 +60,80 @@ def load_excel_file(uploaded_file):
     except Exception as e:
         return None, str(e)
 
+def load_and_merge_files(uploaded_files):
+    """Load multiple Excel files and merge them into one dataframe."""
+    if not uploaded_files:
+        return None, None, []
+
+    dfs = []
+    file_info = []
+    errors = []
+
+    for uploaded_file in uploaded_files:
+        df, error = load_excel_file(uploaded_file)
+        if error:
+            errors.append(f"{uploaded_file.name}: {error}")
+        elif df is not None:
+            dfs.append(df)
+            file_info.append(f"{uploaded_file.name} ({len(df):,} rows)")
+
+    if errors:
+        return None, errors, []
+
+    if not dfs:
+        return None, None, []
+
+    merged_df = pd.concat(dfs, ignore_index=True)
+    return merged_df, None, file_info
+
 # Reserve container for navigation at top of sidebar
 nav_container = st.sidebar.container()
 
 # Sidebar - Upload section
 st.sidebar.header("Upload & Configure")
 
-# File uploaders
-uploaded_file1 = st.sidebar.file_uploader(
+# File uploaders with multiple file support
+uploaded_files1 = st.sidebar.file_uploader(
     "Booking Creation Dates (.xls/.xlsx)",
     type=["xls", "xlsx"],
-    help="Upload the file containing when bookings were created",
-    key="cust_file1"
+    help="Upload files containing when bookings were created. You can select multiple files from different Bookeo instances.",
+    key="cust_file1",
+    accept_multiple_files=True
 )
 
-uploaded_file2 = st.sidebar.file_uploader(
+uploaded_files2 = st.sidebar.file_uploader(
     "Visit Dates (.xls/.xlsx)",
     type=["xls", "xlsx"],
-    help="Upload the file containing when customers actually visited",
-    key="cust_file2"
+    help="Upload files containing when customers actually visited. You can select multiple files from different Bookeo instances.",
+    key="cust_file2",
+    accept_multiple_files=True
 )
 
-# Load File 1
-if uploaded_file1 is not None:
-    df1, error1 = load_excel_file(uploaded_file1)
-    if error1:
-        st.sidebar.error(f"Error reading File 1: {error1}")
-    else:
+# Load and merge File 1
+if uploaded_files1:
+    df1, errors1, file_info1 = load_and_merge_files(uploaded_files1)
+    if errors1:
+        for error in errors1:
+            st.sidebar.error(f"Error: {error}")
+    elif df1 is not None:
         st.session_state.df1 = df1
-        st.sidebar.success(f"File 1 loaded: {len(df1):,} rows")
+        if len(file_info1) == 1:
+            st.sidebar.success(f"Loaded: {len(df1):,} rows")
+        else:
+            st.sidebar.success(f"Merged {len(file_info1)} files: {len(df1):,} total rows")
 
-# Load File 2
-if uploaded_file2 is not None:
-    df2, error2 = load_excel_file(uploaded_file2)
-    if error2:
-        st.sidebar.error(f"Error reading File 2: {error2}")
-    else:
+# Load and merge File 2
+if uploaded_files2:
+    df2, errors2, file_info2 = load_and_merge_files(uploaded_files2)
+    if errors2:
+        for error in errors2:
+            st.sidebar.error(f"Error: {error}")
+    elif df2 is not None:
         st.session_state.df2 = df2
-        st.sidebar.success(f"File 2 loaded: {len(df2):,} rows")
+        if len(file_info2) == 1:
+            st.sidebar.success(f"Loaded: {len(df2):,} rows")
+        else:
+            st.sidebar.success(f"Merged {len(file_info2)} files: {len(df2):,} total rows")
 
 # Fill navigation container (now that files are loaded)
 if st.session_state.df1 is not None and st.session_state.df2 is not None:
@@ -166,6 +205,21 @@ else:
         key="cust_email_col"
     )
 
+    # Get visit date column mapping
+    default_start_col = "Start" if "Start" in df2.columns else df2.columns[0]
+    id_col_2 = st.sidebar.selectbox(
+        "Booking ID (File 2)",
+        options=df2.columns.tolist(),
+        index=df2.columns.tolist().index("Booking number") if "Booking number" in df2.columns else 0,
+        key="cust_id_col_2"
+    )
+    visit_col_2 = st.sidebar.selectbox(
+        "Visit Date (File 2)",
+        options=df2.columns.tolist(),
+        index=df2.columns.tolist().index(default_start_col) if default_start_col in df2.columns else 0,
+        key="cust_visit_col_2"
+    )
+
     # Check if email column is configured
     if email_col == "None":
         st.warning("""
@@ -175,7 +229,7 @@ else:
         This allows us to identify unique customers and track recurring visits.
         """)
     else:
-        # Prepare customer data
+        # Prepare customer data with visit dates
         customer_data = df1[[id_col_1, email_col]].copy()
         customer_data.columns = ['booking_id', 'email']
 
@@ -183,12 +237,42 @@ else:
         if location_col != "None":
             customer_data['location'] = df1[location_col]
 
+        # Merge with visit dates from df2
+        df2_prep = df2[[id_col_2, visit_col_2]].copy()
+        df2_prep.columns = ['booking_id', 'visit_date']
+        df2_prep['visit_date'] = pd.to_datetime(df2_prep['visit_date'], errors='coerce')
+        customer_data = customer_data.merge(df2_prep, on='booking_id', how='inner')
+
         # Remove rows with missing emails
         customer_data = customer_data[customer_data['email'].notna() & (customer_data['email'] != '')]
 
         if len(customer_data) == 0:
             st.warning("No valid email addresses found in the data.")
         else:
+            # Date range selector in reserved container (under header)
+            min_date = customer_data['visit_date'].min().date()
+            max_date = customer_data['visit_date'].max().date()
+
+            with date_range_container:
+                date_col1, date_col2 = st.columns([2, 4])
+                with date_col1:
+                    date_range = st.date_input(
+                        "Date Range (Visit Date)",
+                        value=(min_date, max_date),
+                        min_value=min_date,
+                        max_value=max_date,
+                        help="Filter customers by visit date",
+                        key="cust_date_range"
+                    )
+
+            # Apply date filter
+            if len(date_range) == 2:
+                start_date, end_date = date_range
+                customer_data = customer_data[
+                    (customer_data['visit_date'].dt.date >= start_date) &
+                    (customer_data['visit_date'].dt.date <= end_date)
+                ]
+
             # Count bookings per customer
             customer_frequency = customer_data.groupby('email').agg({
                 'booking_id': 'count'
