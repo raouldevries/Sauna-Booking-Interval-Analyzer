@@ -850,6 +850,40 @@ else:
         do_metrics = get_phase_metrics('DO')
         care_metrics = get_phase_metrics('CARE')
 
+        # Override THINK metrics to use ALL campaigns for clicks/CTR/spend
+        # (THINK represents consideration stage - measured by engagement across all campaigns)
+        all_impressions = combined_df['impressions'].sum() if 'impressions' in combined_df.columns else 0
+        all_reach = combined_df['reach'].sum() if 'reach' in combined_df.columns else 0
+        all_total_reach = all_impressions + all_reach
+        all_clicks = combined_df['clicks'].sum() if 'clicks' in combined_df.columns else 0
+        all_spend = combined_df['spend'].sum()
+
+        # Platform breakdown for all campaigns
+        google_all = combined_df[combined_df['Platform'] == 'Google Ads']
+        meta_all = combined_df[combined_df['Platform'] == 'Meta Ads']
+        g_all_impr = google_all['impressions'].sum() if 'impressions' in google_all.columns else 0
+        m_all_reach = meta_all['reach'].sum() if 'reach' in meta_all.columns else 0
+        g_all_clicks = google_all['clicks'].sum() if 'clicks' in google_all.columns else 0
+        m_all_clicks = meta_all['clicks'].sum() if 'clicks' in meta_all.columns else 0
+        g_all_spend = google_all['spend'].sum()
+        m_all_spend = meta_all['spend'].sum()
+
+        # Calculate CTR for all campaigns
+        all_ctr = (all_clicks / all_total_reach * 100) if all_total_reach > 0 else 0
+        g_all_ctr = (g_all_clicks / g_all_impr * 100) if g_all_impr > 0 else 0
+        m_all_ctr = (m_all_clicks / m_all_reach * 100) if m_all_reach > 0 else 0
+
+        # Update think_metrics with all-campaign data
+        think_metrics['clicks'] = all_clicks
+        think_metrics['ctr'] = all_ctr
+        think_metrics['spend'] = all_spend
+        think_metrics['google']['clicks'] = g_all_clicks
+        think_metrics['google']['ctr'] = g_all_ctr
+        think_metrics['google']['spend'] = g_all_spend
+        think_metrics['meta']['clicks'] = m_all_clicks
+        think_metrics['meta']['ctr'] = m_all_ctr
+        think_metrics['meta']['spend'] = m_all_spend
+
         # Calculate rebooking metrics and CLV from booking data if available
         rebookings = 0
         rebook_rate = 0
