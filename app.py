@@ -42,57 +42,7 @@ init_session_state()
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
 
-# Password protection - Show login page if not authenticated
-if not st.session_state.authenticated:
-    # Hide sidebar on login page
-    st.markdown("""
-    <style>
-    [data-testid="stSidebar"] { display: none; }
-    </style>
-    """, unsafe_allow_html=True)
-
-    # Centered login container
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        st.markdown("<div style='height: 80px'></div>", unsafe_allow_html=True)
-
-        # Kuuma logo centered
-        st.markdown("""
-        <div style="display: flex; justify-content: center; margin-bottom: 2rem;">
-            <img src="https://kuuma.nl/wp-content/themes/kuuma/images/logo.svg" width="180">
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown("<h2 style='text-align: center; margin-bottom: 0.5rem;'>Kuuma Booking Analyzer</h2>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #666; margin-bottom: 2rem;'>Customer insights & booking intelligence</p>", unsafe_allow_html=True)
-
-        # Password input
-        password = st.text_input("Enter password", type="password", key="login_password")
-
-        # Login button
-        if st.button("Login", use_container_width=True, type="primary"):
-            if password == "Kuuma2026!":
-                st.session_state.authenticated = True
-                st.switch_page("pages/1_Overview.py")
-            else:
-                st.error("Incorrect password. Please try again.")
-
-    st.stop()
-
-# ============ AUTHENTICATED CONTENT BELOW ============
-
-# Header with logo
-col1, col2 = st.columns([1, 5])
-with col1:
-    st.image("https://kuuma.nl/wp-content/themes/kuuma/images/logo.svg", width=120)
-with col2:
-    st.title("Kuuma Booking Analyzer")
-    st.markdown("**Customer insights & booking intelligence**")
-
-# Reserve container for date range selector (filled after data loads)
-date_range_container = st.container()
-
-# Google Drive functions
+# Google Drive functions (defined early so they can be used on login page)
 @st.cache_resource
 def get_drive_service():
     """Connect to Google Drive using service account credentials."""
@@ -107,7 +57,6 @@ def get_drive_service():
         service = build('drive', 'v3', credentials=credentials)
         return service
     except Exception as e:
-        st.error(f"Failed to connect to Google Drive: {e}")
         return None
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
@@ -124,7 +73,6 @@ def list_drive_files(folder_id):
         ).execute()
         return results.get('files', [])
     except Exception as e:
-        st.error(f"Failed to list Drive files: {e}")
         return []
 
 @st.cache_data(ttl=14400, show_spinner=False)  # Cache for 4 hours
@@ -184,10 +132,8 @@ def load_files_from_drive():
 
         # Excel files - Detect file type by name - matches Bookeo export naming
         if 'date booked' in name_lower or 'dated booked' in name_lower:
-            # "the date booked" = when customer visited
             visit_files.append(f)
         elif 'day the booking was made' in name_lower or 'booking was made' in name_lower:
-            # "the day the booking was made" = when booking was created
             booking_files.append(f)
         elif 'visit' in name_lower or 'start' in name_lower or 'datum' in name_lower:
             visit_files.append(f)
@@ -205,11 +151,10 @@ def load_files_from_drive():
                     engine = 'xlrd' if f['name'].endswith('.xls') else 'openpyxl'
                     df = pd.read_excel(file_buffer, engine=engine)
                     dfs.append(df)
-                except Exception as e:
-                    st.warning(f"Could not read {f['name']}: {e}")
+                except Exception:
+                    pass
         if dfs:
             df1 = pd.concat(dfs, ignore_index=True)
-            # Merge Activity and Tour columns into unified Location column
             if 'Activity' in df1.columns and 'Tour' in df1.columns:
                 df1['Location'] = df1['Activity'].fillna(df1['Tour'])
             elif 'Activity' in df1.columns:
@@ -228,11 +173,10 @@ def load_files_from_drive():
                     engine = 'xlrd' if f['name'].endswith('.xls') else 'openpyxl'
                     df = pd.read_excel(file_buffer, engine=engine)
                     dfs.append(df)
-                except Exception as e:
-                    st.warning(f"Could not read {f['name']}: {e}")
+                except Exception:
+                    pass
         if dfs:
             df2 = pd.concat(dfs, ignore_index=True)
-            # Merge Activity and Tour columns into unified Location column
             if 'Activity' in df2.columns and 'Tour' in df2.columns:
                 df2['Location'] = df2['Activity'].fillna(df2['Tour'])
             elif 'Activity' in df2.columns:
@@ -248,34 +192,25 @@ def load_files_from_drive():
             file_buffer = download_drive_file(f['id'], f['name'])
             if file_buffer:
                 try:
-                    # Google Ads CSV has 2-line header, skip them
                     content = file_buffer.getvalue().decode('utf-8')
                     lines = content.split('\n')
                     csv_content = '\n'.join(lines[2:])
                     df = pd.read_csv(StringIO(csv_content))
                     df['Platform'] = 'Google Ads'
-                    # Apply column mapping
                     column_mapping = {
-                        'Campaign': 'campaign_name',
-                        'Cost': 'spend',
-                        'Conversions': 'conversions',
-                        'Conv. value': 'conversion_value',
-                        'Impr.': 'impressions',
-                        'Clicks': 'clicks',
-                        'CTR': 'ctr',
-                        'Avg. CPC': 'cpc'
+                        'Campaign': 'campaign_name', 'Cost': 'spend',
+                        'Conversions': 'conversions', 'Conv. value': 'conversion_value',
+                        'Impr.': 'impressions', 'Clicks': 'clicks',
+                        'CTR': 'ctr', 'Avg. CPC': 'cpc'
                     }
                     df = df.rename(columns=column_mapping)
-                    # Convert numeric columns (remove commas from thousand separators first)
-                    numeric_cols = ['spend', 'conversions', 'conversion_value', 'impressions', 'clicks']
-                    for col in numeric_cols:
+                    for col in ['spend', 'conversions', 'conversion_value', 'impressions', 'clicks']:
                         if col in df.columns:
-                            # Remove commas from strings before converting
                             df[col] = df[col].astype(str).str.replace(',', '', regex=False)
                             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
                     dfs.append(df)
-                except Exception as e:
-                    st.warning(f"Could not read {f['name']}: {e}")
+                except Exception:
+                    pass
         if dfs:
             google_ads_df = pd.concat(dfs, ignore_index=True)
 
@@ -289,34 +224,92 @@ def load_files_from_drive():
                 try:
                     df = pd.read_csv(file_buffer)
                     df['Platform'] = 'Meta Ads'
-                    # Apply column mapping
                     column_mapping = {
-                        'Campaign name': 'campaign_name',
-                        'Amount spent (EUR)': 'spend',
-                        'Purchases': 'conversions',
-                        'Purchases conversion value': 'conversion_value',
-                        'Reach': 'reach',
-                        'Link clicks': 'clicks',
+                        'Campaign name': 'campaign_name', 'Amount spent (EUR)': 'spend',
+                        'Purchases': 'conversions', 'Purchases conversion value': 'conversion_value',
+                        'Reach': 'reach', 'Link clicks': 'clicks',
                         'CTR (link click-through rate)': 'ctr',
                         'CPC (cost per link click) (EUR)': 'cpc',
                         'CPM (cost per 1,000 impressions) (EUR)': 'cpm',
                         'Results': 'results'
                     }
                     df = df.rename(columns=column_mapping)
-                    # Convert numeric columns (remove commas from thousand separators first)
-                    numeric_cols = ['spend', 'conversions', 'conversion_value', 'reach', 'clicks', 'results']
-                    for col in numeric_cols:
+                    for col in ['spend', 'conversions', 'conversion_value', 'reach', 'clicks', 'results']:
                         if col in df.columns:
-                            # Remove commas from strings before converting
                             df[col] = df[col].astype(str).str.replace(',', '', regex=False)
                             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
                     dfs.append(df)
-                except Exception as e:
-                    st.warning(f"Could not read {f['name']}: {e}")
+                except Exception:
+                    pass
         if dfs:
             meta_ads_df = pd.concat(dfs, ignore_index=True)
 
     return df1, df2, google_ads_df, meta_ads_df, None
+
+# Password protection - Show login page if not authenticated
+if not st.session_state.authenticated:
+    # Hide sidebar on login page
+    st.markdown("""
+    <style>
+    [data-testid="stSidebar"] { display: none; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # Centered login container
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("<div style='height: 80px'></div>", unsafe_allow_html=True)
+
+        # Kuuma logo centered
+        st.markdown("""
+        <div style="display: flex; justify-content: center; margin-bottom: 2rem;">
+            <img src="https://kuuma.nl/wp-content/themes/kuuma/images/logo.svg" width="180">
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("<h2 style='text-align: center; margin-bottom: 0.5rem;'>Kuuma Booking Analyzer</h2>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #666; margin-bottom: 2rem;'>Customer insights & booking intelligence</p>", unsafe_allow_html=True)
+
+        # Password input
+        password = st.text_input("Enter password", type="password", key="login_password")
+
+        # Login button
+        if st.button("Login", use_container_width=True, type="primary"):
+            if password == "Kuuma2026!":
+                st.session_state.authenticated = True
+
+                # Load data immediately after login
+                if GOOGLE_DRIVE_AVAILABLE and "gcp_service_account" in st.secrets and "google_drive" in st.secrets:
+                    with st.spinner("Loading data from Google Drive..."):
+                        df1, df2, google_ads_df, meta_ads_df, error = load_files_from_drive()
+                        if df1 is not None:
+                            st.session_state.df1 = df1
+                        if df2 is not None:
+                            st.session_state.df2 = df2
+                        if google_ads_df is not None:
+                            st.session_state.google_ads_df = google_ads_df
+                        if meta_ads_df is not None:
+                            st.session_state.meta_ads_df = meta_ads_df
+                        st.session_state.drive_loaded = True
+
+                st.switch_page("pages/1_Overview.py")
+            else:
+                st.error("Incorrect password. Please try again.")
+
+    st.stop()
+
+# ============ AUTHENTICATED CONTENT BELOW ============
+
+# Header with logo
+col1, col2 = st.columns([1, 5])
+with col1:
+    st.image("https://kuuma.nl/wp-content/themes/kuuma/images/logo.svg", width=120)
+with col2:
+    st.title("Kuuma Booking Analyzer")
+    st.markdown("**Customer insights & booking intelligence**")
+
+# Reserve container for date range selector (filled after data loads)
+date_range_container = st.container()
 
 # Parse uploaded files
 @st.cache_data
