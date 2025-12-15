@@ -28,12 +28,22 @@ st.markdown(hide_default_nav, unsafe_allow_html=True)
 
 # Capacity data from Bezettings analyse
 # dal + piek = weekday (ma-do) capacity
+# Note: Den Bosch, Nyma, Bloemendaal are new locations without capacity data yet
 LOCATION_CAPACITY = {
-    'Kuuma Marineterrein Matsu': {'dal': 96, 'piek': 366, 'weekday': 462, 'weekend': 198, 'cluster': 'Flagship'},
-    'Kuuma Marineterrein Bjørk': {'dal': 128, 'piek': 488, 'weekday': 616, 'weekend': 264, 'cluster': 'Flagship'},
-    'Kuuma Noord': {'dal': 96, 'piek': 336, 'weekday': 432, 'weekend': 192, 'cluster': 'Groeier'},
-    'Kuuma Sloterplas': {'dal': 112, 'piek': 392, 'weekday': 504, 'weekend': 224, 'cluster': 'Groeier'},
-    'Kuuma Aan ´t IJ (Centrum)': {'dal': 96, 'piek': 324, 'weekday': 420, 'weekend': 180, 'cluster': 'Groeier'},
+    # Flagship
+    'Kuuma Marineterrein Matsu': {'dal': 96, 'piek': 366, 'weekday': 462, 'weekend': 198, 'cluster': 'Flagship'},  # K1
+    'Kuuma Marineterrein Bjørk': {'dal': 128, 'piek': 488, 'weekday': 616, 'weekend': 264, 'cluster': 'Flagship'},  # K8
+    'Kuuma Scheveningen': {'dal': 96, 'piek': 520, 'weekday': 616, 'weekend': 264, 'cluster': 'Flagship'},  # K13
+    # Groeier
+    'Kuuma Noord': {'dal': 96, 'piek': 336, 'weekday': 432, 'weekend': 192, 'cluster': 'Groeier'},  # K2
+    'Kuuma Sloterplas': {'dal': 112, 'piek': 392, 'weekday': 504, 'weekend': 224, 'cluster': 'Groeier'},  # K12
+    'Kuuma Aan ´t IJ (Centrum)': {'dal': 96, 'piek': 324, 'weekday': 420, 'weekend': 180, 'cluster': 'Groeier'},  # K5
+    'Kuuma Nijmegen Lent': {'dal': 120, 'piek': 342, 'weekday': 462, 'weekend': 198, 'cluster': 'Groeier'},  # K3
+    'Kuuma Rotterdam Rijnhaven': {'dal': 96, 'piek': 324, 'weekday': 420, 'weekend': 180, 'cluster': 'Groeier'},  # K6
+    # Onderbenut
+    'Kuuma Rotterdam Delfshaven': {'dal': 120, 'piek': 342, 'weekday': 462, 'weekend': 198, 'cluster': 'Onderbenut'},  # K4
+    'Kuuma Katwijk': {'dal': 96, 'piek': 282, 'weekday': 378, 'weekend': 162, 'cluster': 'Onderbenut'},  # K9
+    'Kuuma Wijk aan Zee': {'dal': 96, 'piek': 336, 'weekday': 432, 'weekend': 192, 'cluster': 'Onderbenut'},  # K11
 }
 
 CLUSTER_TARGETS = {
