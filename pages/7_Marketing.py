@@ -221,6 +221,37 @@ def get_capacity_per_location(marketing_loc, num_weeks=4):
     }
 
 
+@st.cache_data(show_spinner=False)
+def calculate_marketing_metrics(_df_hash, df_json):
+    """Calculate all marketing metrics with caching. Uses df_hash for cache key."""
+    df = pd.read_json(StringIO(df_json))
+
+    total_spend = df['spend'].sum()
+    total_conversions = df['conversions'].sum()
+    total_conv_value = df['conversion_value'].sum() if 'conversion_value' in df.columns else 0
+    roas = (total_conv_value / total_spend * 100) if total_spend > 0 else 0
+    cpa = (total_spend / total_conversions) if total_conversions > 0 else 0
+
+    # Platform breakdown
+    google_df = df[df['Platform'] == 'Google Ads']
+    meta_df = df[df['Platform'] == 'Meta Ads']
+
+    return {
+        'total_spend': total_spend,
+        'total_conversions': total_conversions,
+        'total_conv_value': total_conv_value,
+        'roas': roas,
+        'cpa': cpa,
+        'google_spend': google_df['spend'].sum(),
+        'meta_spend': meta_df['spend'].sum(),
+        'google_conv': google_df['conversions'].sum(),
+        'meta_conv': meta_df['conversions'].sum(),
+        'google_conv_value': google_df['conversion_value'].sum() if 'conversion_value' in google_df.columns else 0,
+        'meta_conv_value': meta_df['conversion_value'].sum() if 'conversion_value' in meta_df.columns else 0,
+    }
+
+
+@st.cache_data(show_spinner=False)
 def parse_google_ads_csv(uploaded_file):
     """Parse Google Ads CSV export (has 2-line header)."""
     try:
@@ -266,6 +297,7 @@ def parse_google_ads_csv(uploaded_file):
         return None, str(e)
 
 
+@st.cache_data(show_spinner=False)
 def parse_meta_ads_csv(uploaded_file):
     """Parse Meta Ads CSV export."""
     try:
@@ -317,79 +349,100 @@ st.markdown("Analyze Google Ads and Meta Ads performance using the SEE-THINK-DO-
 # Reserve container for date range selector (filled after data loads)
 date_range_container = st.container()
 
-# Default file paths for auto-loading
+# Default file paths for auto-loading (only used for local development)
+import os
 DEFAULT_DATA_PATH = "/Users/raouldevries/Work/Kuuma/Booking analyzer"
 DEFAULT_GOOGLE_ADS = f"{DEFAULT_DATA_PATH}/marketing data/google_ads.csv"
 DEFAULT_META_ADS = f"{DEFAULT_DATA_PATH}/marketing data/meta_ads.csv"
 DEFAULT_BOOKING_CREATION = f"{DEFAULT_DATA_PATH}/booking data/the day the booking was made.xls"
 DEFAULT_VISIT_DATES = f"{DEFAULT_DATA_PATH}/booking data/the date booked.xls"
 
-import os
+@st.cache_data(show_spinner=False)
+def _load_local_excel(file_path, engine='xlrd'):
+    """Load Excel file with caching."""
+    if os.path.exists(file_path):
+        return pd.read_excel(file_path, engine=engine)
+    return None
+
+@st.cache_data(show_spinner=False)
+def _load_local_csv(file_path):
+    """Load and process local CSV file with caching."""
+    if not os.path.exists(file_path):
+        return None
+    return pd.read_csv(file_path)
 
 def load_default_files():
-    """Auto-load default data files if they exist."""
+    """Auto-load default data files if they exist (local development only)."""
+    # Skip if already attempted loading
+    if st.session_state.get('_local_files_checked', False):
+        return
+    st.session_state._local_files_checked = True
+
     # Load booking data (df1 - booking creation dates)
-    if st.session_state.df1 is None and os.path.exists(DEFAULT_BOOKING_CREATION):
-        try:
-            st.session_state.df1 = pd.read_excel(DEFAULT_BOOKING_CREATION, engine='xlrd')
-        except Exception as e:
-            pass
+    if st.session_state.df1 is None:
+        df = _load_local_excel(DEFAULT_BOOKING_CREATION)
+        if df is not None:
+            st.session_state.df1 = df
 
     # Load booking data (df2 - visit dates)
-    if st.session_state.df2 is None and os.path.exists(DEFAULT_VISIT_DATES):
-        try:
-            st.session_state.df2 = pd.read_excel(DEFAULT_VISIT_DATES, engine='xlrd')
-        except Exception as e:
-            pass
+    if st.session_state.df2 is None:
+        df = _load_local_excel(DEFAULT_VISIT_DATES)
+        if df is not None:
+            st.session_state.df2 = df
 
     # Load Google Ads data
-    if st.session_state.google_ads_df is None and os.path.exists(DEFAULT_GOOGLE_ADS):
-        try:
-            with open(DEFAULT_GOOGLE_ADS, 'rb') as f:
-                class FileWrapper:
-                    def __init__(self, file_obj):
-                        self._file = file_obj
-                        self._content = file_obj.read()
-                    def getvalue(self):
-                        return self._content
-                df, error = parse_google_ads_csv(FileWrapper(f))
-                if not error:
-                    st.session_state.google_ads_df = df
-        except Exception as e:
-            pass
+    if st.session_state.google_ads_df is None:
+        df = _load_local_csv(DEFAULT_GOOGLE_ADS)
+        if df is not None:
+            # Process Google Ads CSV (skip header rows already handled by pandas)
+            df['Platform'] = 'Google Ads'
+            column_mapping = {
+                'Campaign': 'campaign_name',
+                'Cost': 'spend',
+                'Conversions': 'conversions',
+                'Conv. value': 'conversion_value',
+                'Impr.': 'impressions',
+                'Clicks': 'clicks',
+                'CTR': 'ctr',
+                'Avg. CPC': 'cpc'
+            }
+            df = df.rename(columns=column_mapping)
+            if 'Campaign status' in df.columns:
+                df = df[~df['Campaign status'].astype(str).str.startswith('Total:')]
+            for col in ['spend', 'conversions', 'conversion_value', 'impressions', 'clicks', 'cpc']:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', '').str.replace(' --', '0'), errors='coerce').fillna(0)
+            if 'ctr' in df.columns:
+                df['ctr'] = pd.to_numeric(df['ctr'].astype(str).str.replace('%', '').str.replace(' --', '0'), errors='coerce').fillna(0)
+            st.session_state.google_ads_df = df
 
     # Load Meta Ads data
-    if st.session_state.meta_ads_df is None and os.path.exists(DEFAULT_META_ADS):
-        try:
-            df = pd.read_csv(DEFAULT_META_ADS)
+    if st.session_state.meta_ads_df is None:
+        df = _load_local_csv(DEFAULT_META_ADS)
+        if df is not None:
             df['Platform'] = 'Meta Ads'
-            # Apply same column mapping as parse_meta_ads_csv
-            # Note: 'Purchases' is actual conversions, 'Results' is campaign objective result
             column_mapping = {
                 'Campaign name': 'campaign_name',
                 'Amount spent (EUR)': 'spend',
-                'Purchases': 'conversions',  # Use Purchases for actual conversions
+                'Purchases': 'conversions',
                 'Purchases conversion value': 'conversion_value',
                 'Reach': 'reach',
                 'Link clicks': 'clicks',
                 'CTR (link click-through rate)': 'ctr',
                 'CPC (cost per link click) (EUR)': 'cpc',
                 'CPM (cost per 1,000 impressions) (EUR)': 'cpm',
-                'Results': 'results'  # Keep results separate
+                'Results': 'results'
             }
             df = df.rename(columns=column_mapping)
-            # Filter out total/summary rows (empty campaign names)
             if 'campaign_name' in df.columns:
                 df = df[df['campaign_name'].notna()]
                 df = df[df['campaign_name'].astype(str).str.strip() != '']
-            for col in ['spend', 'conversions', 'conversion_value', 'reach', 'clicks', 'cpc', 'cpm', 'purchases']:
+            for col in ['spend', 'conversions', 'conversion_value', 'reach', 'clicks', 'cpc', 'cpm']:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             if 'ctr' in df.columns:
                 df['ctr'] = pd.to_numeric(df['ctr'], errors='coerce').fillna(0)
             st.session_state.meta_ads_df = df
-        except Exception as e:
-            pass
 
 # Initialize session state using centralized function
 init_session_state()
