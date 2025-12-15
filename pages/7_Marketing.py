@@ -873,13 +873,13 @@ else:
         g_all_ctr = (g_all_clicks / g_all_impr * 100) if g_all_impr > 0 else 0
         m_all_ctr = (m_all_clicks / m_all_reach * 100) if m_all_reach > 0 else 0
 
-        # Update think_metrics with all-campaign data
+        # Update think_metrics with all-campaign data (Google Ads spend = 0, tracked in DO)
         think_metrics['clicks'] = all_clicks
         think_metrics['ctr'] = all_ctr
-        think_metrics['spend'] = all_spend
+        think_metrics['spend'] = m_all_spend  # Only Meta Ads spend for THINK
         think_metrics['google']['clicks'] = g_all_clicks
         think_metrics['google']['ctr'] = g_all_ctr
-        think_metrics['google']['spend'] = g_all_spend
+        think_metrics['google']['spend'] = 0  # Google Ads spend tracked in DO
         think_metrics['meta']['clicks'] = m_all_clicks
         think_metrics['meta']['ctr'] = m_all_ctr
         think_metrics['meta']['spend'] = m_all_spend
