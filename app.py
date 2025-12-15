@@ -200,8 +200,9 @@ def load_files_from_drive():
                     column_mapping = {
                         'Campaign': 'campaign_name', 'Cost': 'spend',
                         'Conversions': 'conversions', 'Conv. value': 'conversion_value',
-                        'Impr.': 'impressions', 'Clicks': 'clicks',
-                        'CTR': 'ctr', 'Avg. CPC': 'cpc'
+                        'Impr.': 'impressions', 'Impressions': 'impressions',
+                        'Clicks': 'clicks', 'CTR': 'ctr', 'Avg. CPC': 'cpc',
+                        'CPC': 'cpc', 'Conv. Value': 'conversion_value'
                     }
                     df = df.rename(columns=column_mapping)
                     for col in ['spend', 'conversions', 'conversion_value', 'impressions', 'clicks']:

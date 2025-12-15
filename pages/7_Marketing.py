@@ -264,16 +264,19 @@ def parse_google_ads_csv(uploaded_file):
         df = pd.read_csv(StringIO(csv_content))
         df['Platform'] = 'Google Ads'
 
-        # Standardize column names
+        # Standardize column names (with fallback variations)
         column_mapping = {
             'Campaign': 'campaign_name',
             'Cost': 'spend',
             'Conversions': 'conversions',
             'Conv. value': 'conversion_value',
+            'Conv. Value': 'conversion_value',
             'Impr.': 'impressions',
+            'Impressions': 'impressions',
             'Clicks': 'clicks',
             'CTR': 'ctr',
-            'Avg. CPC': 'cpc'
+            'Avg. CPC': 'cpc',
+            'CPC': 'cpc'
         }
 
         df = df.rename(columns=column_mapping)
@@ -401,10 +404,13 @@ def load_default_files():
                 'Cost': 'spend',
                 'Conversions': 'conversions',
                 'Conv. value': 'conversion_value',
+                'Conv. Value': 'conversion_value',
                 'Impr.': 'impressions',
+                'Impressions': 'impressions',
                 'Clicks': 'clicks',
                 'CTR': 'ctr',
-                'Avg. CPC': 'cpc'
+                'Avg. CPC': 'cpc',
+                'CPC': 'cpc'
             }
             df = df.rename(columns=column_mapping)
             if 'Campaign status' in df.columns:
