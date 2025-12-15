@@ -745,6 +745,10 @@ else:
         st.markdown("---")
         st.markdown("### STDC Performance")
 
+        # Show loading placeholder for STDC section
+        stdc_loading = st.empty()
+        stdc_loading.info("Calculating STDC metrics...")
+
         # Calculate metrics for each STDC phase with platform breakdown
         def get_phase_metrics(phase_name):
             phase_data = combined_df[combined_df['stdc_phase'] == phase_name]
@@ -889,6 +893,9 @@ else:
                             clv = aov * (1 + retention_rate / churn_rate)
                         else:
                             clv = aov * 10  # Cap at 10x AOV if no churn
+
+        # Clear loading placeholder - metrics are ready
+        stdc_loading.empty()
 
         # Stage KPI Cards with colored backgrounds
         st.markdown("""
