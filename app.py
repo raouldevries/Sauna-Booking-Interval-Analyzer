@@ -231,6 +231,11 @@ def load_files_from_drive():
                         'Avg. CPC': 'cpc'
                     }
                     df = df.rename(columns=column_mapping)
+                    # Convert numeric columns
+                    numeric_cols = ['spend', 'conversions', 'conversion_value', 'impressions', 'clicks']
+                    for col in numeric_cols:
+                        if col in df.columns:
+                            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
                     dfs.append(df)
                 except Exception as e:
                     st.warning(f"Could not read {f['name']}: {e}")
@@ -261,6 +266,11 @@ def load_files_from_drive():
                         'Results': 'results'
                     }
                     df = df.rename(columns=column_mapping)
+                    # Convert numeric columns
+                    numeric_cols = ['spend', 'conversions', 'conversion_value', 'reach', 'clicks', 'results']
+                    for col in numeric_cols:
+                        if col in df.columns:
+                            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
                     dfs.append(df)
                 except Exception as e:
                     st.warning(f"Could not read {f['name']}: {e}")
