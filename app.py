@@ -231,10 +231,12 @@ def load_files_from_drive():
                         'Avg. CPC': 'cpc'
                     }
                     df = df.rename(columns=column_mapping)
-                    # Convert numeric columns
+                    # Convert numeric columns (remove commas from thousand separators first)
                     numeric_cols = ['spend', 'conversions', 'conversion_value', 'impressions', 'clicks']
                     for col in numeric_cols:
                         if col in df.columns:
+                            # Remove commas from strings before converting
+                            df[col] = df[col].astype(str).str.replace(',', '', regex=False)
                             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
                     dfs.append(df)
                 except Exception as e:
@@ -266,10 +268,12 @@ def load_files_from_drive():
                         'Results': 'results'
                     }
                     df = df.rename(columns=column_mapping)
-                    # Convert numeric columns
+                    # Convert numeric columns (remove commas from thousand separators first)
                     numeric_cols = ['spend', 'conversions', 'conversion_value', 'reach', 'clicks', 'results']
                     for col in numeric_cols:
                         if col in df.columns:
+                            # Remove commas from strings before converting
+                            df[col] = df[col].astype(str).str.replace(',', '', regex=False)
                             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
                     dfs.append(df)
                 except Exception as e:
