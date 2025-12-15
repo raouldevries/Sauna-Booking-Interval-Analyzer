@@ -105,6 +105,7 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
         st.page_link("pages/4_Revenue.py", label="Revenue & Value", icon=":material/payments:")
         st.page_link("pages/5_Promotions.py", label="Promotions", icon=":material/sell:")
         st.page_link("pages/6_Capacity.py", label="Capacity Analysis", icon=":material/analytics:")
+        st.page_link("pages/7_Marketing.py", label="Marketing", icon=":material/campaign:")
         st.markdown("---")
 
 # Main content
@@ -326,9 +327,16 @@ else:
                 promo_display['Total Revenue'] = promo_display['Total Revenue'].apply(lambda x: f"€{x:,.0f}")
                 promo_display['Avg Booking'] = promo_display['Avg Booking'].apply(lambda x: f"€{x:.2f}")
 
+                promo_config = {
+                    'Bookings': st.column_config.NumberColumn('Bookings', help='Number of bookings using this promotion'),
+                    '% of Promo Bookings': st.column_config.NumberColumn('% of Promo Bookings', help='Share of all promotional bookings'),
+                    'Total Revenue': st.column_config.TextColumn('Total Revenue', help='Revenue from this promotion'),
+                    '% of Promo Revenue': st.column_config.NumberColumn('% of Promo Revenue', help='Share of all promotional revenue'),
+                    'Avg Booking': st.column_config.TextColumn('Avg Booking', help='Average booking value with this promotion'),
+                }
                 st.dataframe(
                     promo_display[['Bookings', '% of Promo Bookings', 'Total Revenue', '% of Promo Revenue', 'Avg Booking']],
-                    use_container_width=True
+                    use_container_width=True, column_config=promo_config
                 )
 
                 # Top promotions chart
@@ -443,7 +451,14 @@ else:
                     location_promo['Promo Rate (%)'] = (location_promo['Promo Bookings'] / location_promo['Total Bookings'] * 100).round(1)
                     location_promo = location_promo.sort_values('Promo Bookings', ascending=False)
 
-                    st.dataframe(location_promo, use_container_width=True, hide_index=True)
+                    loc_promo_config = {
+                        'Location': st.column_config.TextColumn('Location'),
+                        'Total Bookings': st.column_config.NumberColumn('Total Bookings', help='All bookings at this location'),
+                        'Promo Bookings': st.column_config.NumberColumn('Promo Bookings', help='Bookings that used a promotion'),
+                        'Total Revenue': st.column_config.NumberColumn('Total Revenue', help='Revenue from all bookings'),
+                        'Promo Rate (%)': st.column_config.NumberColumn('Promo Rate (%)', help='Percentage of bookings using promotions'),
+                    }
+                    st.dataframe(location_promo, use_container_width=True, hide_index=True, column_config=loc_promo_config)
 
                     fig_loc_promo = px.bar(
                         location_promo,

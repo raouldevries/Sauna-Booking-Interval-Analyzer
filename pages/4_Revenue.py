@@ -87,6 +87,7 @@ if st.session_state.df1 is not None:
         st.page_link("pages/4_Revenue.py", label="Revenue & Value", icon=":material/payments:")
         st.page_link("pages/5_Promotions.py", label="Promotions", icon=":material/sell:")
         st.page_link("pages/6_Capacity.py", label="Capacity Analysis", icon=":material/analytics:")
+        st.page_link("pages/7_Marketing.py", label="Marketing", icon=":material/campaign:")
         st.markdown("---")
 
 # Main content
@@ -259,7 +260,14 @@ else:
                 location_display['Avg Booking'] = location_display['Avg Booking'].apply(lambda x: f"€{x:.2f}")
                 location_display['Median Booking'] = location_display['Median Booking'].apply(lambda x: f"€{x:.2f}")
 
-                st.dataframe(location_display, use_container_width=True)
+                revenue_loc_config = {
+                    'Total Revenue': st.column_config.TextColumn('Total Revenue', help='Sum of all booking revenue'),
+                    '% of Revenue': st.column_config.NumberColumn('% of Revenue', help='Share of total company revenue'),
+                    'Bookings': st.column_config.NumberColumn('Bookings', help='Number of bookings'),
+                    'Avg Booking': st.column_config.TextColumn('Avg Booking', help='Average revenue per booking'),
+                    'Median Booking': st.column_config.TextColumn('Median Booking', help='Typical booking value (ignoring outliers)'),
+                }
+                st.dataframe(location_display, use_container_width=True, column_config=revenue_loc_config)
 
                 # Revenue chart
                 fig_rev_loc = px.bar(
@@ -702,8 +710,18 @@ else:
                     segment_display['Churn Rate'] = segment_display['Churn Rate'].apply(lambda x: f"{x:.1%}")
                     segment_display['CLV'] = segment_display['CLV'].apply(lambda x: f"€{x:.2f}")
 
+                    segment_config = {
+                        'Segment': st.column_config.TextColumn('Segment', help='Customer tier based on booking frequency'),
+                        'Customers': st.column_config.NumberColumn('Customers', help='Number of customers in this segment'),
+                        '% of Total': st.column_config.TextColumn('% of Total', help='Percentage of total customer base'),
+                        'AOV': st.column_config.TextColumn('AOV', help='Average Order Value per booking'),
+                        'Retention Rate': st.column_config.TextColumn('Retention Rate', help='Percentage of customers who returned'),
+                        'Churn Rate': st.column_config.TextColumn('Churn Rate', help='Percentage of customers who stopped booking'),
+                        'CLV': st.column_config.TextColumn('CLV', help='Customer Lifetime Value (predicted total revenue)'),
+                        'Likely Churned': st.column_config.NumberColumn('Likely Churned', help='Customers who may have stopped using the service'),
+                    }
                     st.dataframe(segment_display[['Segment', 'Customers', '% of Total', 'AOV', 'Retention Rate', 'Churn Rate', 'CLV', 'Likely Churned']],
-                                use_container_width=True, hide_index=True)
+                                use_container_width=True, hide_index=True, column_config=segment_config)
 
                     # Segment CLV Chart
                     col1, col2 = st.columns(2)
@@ -803,7 +821,16 @@ else:
                             location_display['Retention Rate'] = location_display['Retention Rate'].apply(lambda x: f"{x:.1%}")
                             location_display['CLV'] = location_display['CLV'].apply(lambda x: f"€{x:.2f}")
 
-                            st.dataframe(location_display, use_container_width=True, hide_index=True)
+                            loc_clv_config = {
+                                'Location': st.column_config.TextColumn('Location'),
+                                'Customers': st.column_config.NumberColumn('Customers', help='Number of unique customers'),
+                                'Bookings': st.column_config.NumberColumn('Bookings', help='Total bookings at this location'),
+                                'AOV': st.column_config.TextColumn('AOV', help='Average Order Value per booking'),
+                                'Retention Rate': st.column_config.TextColumn('Retention Rate', help='Percentage of customers who returned'),
+                                'CLV': st.column_config.TextColumn('CLV', help='Customer Lifetime Value'),
+                                'Likely Churned': st.column_config.NumberColumn('Likely Churned', help='Customers who may have stopped using the service'),
+                            }
+                            st.dataframe(location_display, use_container_width=True, hide_index=True, column_config=loc_clv_config)
 
                             # Location CLV Chart
                             fig_loc_clv = px.bar(

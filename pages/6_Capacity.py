@@ -142,6 +142,7 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
         st.page_link("pages/4_Revenue.py", label="Revenue & Value", icon=":material/payments:")
         st.page_link("pages/5_Promotions.py", label="Promotions", icon=":material/sell:")
         st.page_link("pages/6_Capacity.py", label="Capacity Analysis", icon=":material/analytics:")
+        st.page_link("pages/7_Marketing.py", label="Marketing", icon=":material/campaign:")
         st.markdown("---")
 
 # Main content
@@ -627,9 +628,19 @@ Use this heatmap to optimize your team schedule - ensure adequate coverage durin
 
                     styled_df = display_df.style.apply(color_vs_target, axis=1)
 
-                    st.dataframe(styled_df, use_container_width=True, hide_index=True)
+                    capacity_config = {
+                        'Location': st.column_config.TextColumn('Location'),
+                        'Cluster': st.column_config.TextColumn('Cluster', help='Location category (Flagship, Groeier, Onderbenut)'),
+                        'Dal uren (%)': st.column_config.NumberColumn('Dal uren (%)', help='Occupancy during off-peak hours (Mon-Thu 10:00-16:00)'),
+                        'Dal Target (%)': st.column_config.NumberColumn('Dal Target (%)', help='Target occupancy for off-peak hours'),
+                        'Piek uren (%)': st.column_config.NumberColumn('Piek uren (%)', help='Occupancy during peak hours (Mon-Thu outside 10:00-16:00)'),
+                        'Piek Target (%)': st.column_config.NumberColumn('Piek Target (%)', help='Target occupancy for peak hours'),
+                        'Weekend (%)': st.column_config.NumberColumn('Weekend (%)', help='Occupancy during weekend (Fri-Sun)'),
+                        'Weekend Target (%)': st.column_config.NumberColumn('Weekend Target (%)', help='Target occupancy for weekend'),
+                    }
+                    st.dataframe(styled_df, use_container_width=True, hide_index=True, column_config=capacity_config)
 
-                    st.caption("🟢 At/above target · 🟡 Within 10% · 🔴 More than 10% below")
+                    st.caption("Green = At/above target | Yellow = Within 10% | Red = More than 10% below")
 
                     # Custom target configuration
                     with st.expander("Configure Custom Targets per Location", expanded=False):

@@ -99,6 +99,7 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
         st.page_link("pages/4_Revenue.py", label="Revenue & Value", icon=":material/payments:")
         st.page_link("pages/5_Promotions.py", label="Promotions", icon=":material/sell:")
         st.page_link("pages/6_Capacity.py", label="Capacity Analysis", icon=":material/analytics:")
+        st.page_link("pages/7_Marketing.py", label="Marketing", icon=":material/campaign:")
         st.markdown("---")
 
 # Column mapping section
@@ -518,7 +519,12 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
                 location_stats = location_stats.sort_values('Total Bookings', ascending=False)
                 location_stats['Total Bookings'] = location_stats['Total Bookings'].astype(int)
 
-                st.dataframe(location_stats, use_container_width=True)
+                location_stats_config = {
+                    'Total Bookings': st.column_config.NumberColumn('Total Bookings', help='Number of bookings for this location'),
+                    'Avg Lead Time (days)': st.column_config.NumberColumn('Avg Lead Time (days)', help='Average days between booking and visit'),
+                    'Median Lead Time (days)': st.column_config.NumberColumn('Median Lead Time (days)', help='Typical days between booking and visit (ignoring outliers)'),
+                }
+                st.dataframe(location_stats, use_container_width=True, column_config=location_stats_config)
 
                 # Sauna Visit Time Analysis (Day of Week & Time of Day)
                 # Check if we have time data (not just dates)
@@ -761,7 +767,15 @@ Use this heatmap to optimize your team schedule - ensure adequate coverage durin
                     temp_stats['% of Total'] = (temp_stats['Bookings'] / temp_stats['Bookings'].sum() * 100).round(1)
                     temp_stats = temp_stats[['Bookings', '% of Total', 'Common Months', 'Avg Temp (°C)', 'Avg Lead Time', 'Median Lead Time']]
 
-                    st.dataframe(temp_stats, use_container_width=True)
+                    temp_stats_config = {
+                        'Bookings': st.column_config.NumberColumn('Bookings', help='Number of bookings in this temperature range'),
+                        '% of Total': st.column_config.NumberColumn('% of Total', help='Percentage of all bookings'),
+                        'Common Months': st.column_config.TextColumn('Common Months', help='Months when this temperature range is most common'),
+                        'Avg Temp (°C)': st.column_config.NumberColumn('Avg Temp (°C)', help='Average temperature at time of booking'),
+                        'Avg Lead Time': st.column_config.NumberColumn('Avg Lead Time', help='Average days between booking and visit'),
+                        'Median Lead Time': st.column_config.NumberColumn('Median Lead Time', help='Typical days between booking and visit'),
+                    }
+                    st.dataframe(temp_stats, use_container_width=True, column_config=temp_stats_config)
 
                     # Insights
                     st.info("""

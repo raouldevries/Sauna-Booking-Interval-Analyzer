@@ -105,6 +105,7 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
         st.page_link("pages/4_Revenue.py", label="Revenue & Value", icon=":material/payments:")
         st.page_link("pages/5_Promotions.py", label="Promotions", icon=":material/sell:")
         st.page_link("pages/6_Capacity.py", label="Capacity Analysis", icon=":material/analytics:")
+        st.page_link("pages/7_Marketing.py", label="Marketing", icon=":material/campaign:")
         st.markdown("---")
 
 # Main content
@@ -335,7 +336,11 @@ else:
                     st.plotly_chart(fig_loyalty, use_container_width=True)
 
                 with col2:
-                    st.dataframe(loyalty_distribution, use_container_width=True, hide_index=True)
+                    loyalty_config = {
+                        'Loyalty Type': st.column_config.TextColumn('Loyalty Type', help='How many locations the customer visits'),
+                        'Customers': st.column_config.NumberColumn('Customers', help='Number of customers in this category'),
+                    }
+                    st.dataframe(loyalty_distribution, use_container_width=True, hide_index=True, column_config=loyalty_config)
 
                 # Recurring customers per location
                 st.markdown("### Recurring Customers by Location")
@@ -365,7 +370,13 @@ else:
                 })
                 location_display = pd.concat([location_display, total_row], ignore_index=True)
 
-                st.dataframe(location_display, use_container_width=True, hide_index=True)
+                location_cust_config = {
+                    'Location': st.column_config.TextColumn('Location'),
+                    'Total Customers': st.column_config.NumberColumn('Total Customers', help='Unique customers who booked at this location'),
+                    'Recurring Customers': st.column_config.NumberColumn('Recurring Customers', help='Customers with more than one booking'),
+                    'Recurring Rate (%)': st.column_config.NumberColumn('Recurring Rate (%)', help='Percentage of customers who returned'),
+                }
+                st.dataframe(location_display, use_container_width=True, hide_index=True, column_config=location_cust_config)
 
                 # Explanation
                 global_total = len(customer_frequency)
