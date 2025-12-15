@@ -469,7 +469,7 @@ st.session_state.stdc_tags = {}
 nav_container = st.sidebar.container()
 
 # Sidebar - Upload section
-st.sidebar.header("Marketing Data")
+st.sidebar.header("Data")
 
 # Show loaded status
 if st.session_state.google_ads_df is not None:
