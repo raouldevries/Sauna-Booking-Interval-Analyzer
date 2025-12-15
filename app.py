@@ -49,6 +49,10 @@ if 'df1' not in st.session_state:
     st.session_state.df1 = None
 if 'df2' not in st.session_state:
     st.session_state.df2 = None
+if 'google_ads_df' not in st.session_state:
+    st.session_state.google_ads_df = None
+if 'meta_ads_df' not in st.session_state:
+    st.session_state.meta_ads_df = None
 if 'drive_loaded' not in st.session_state:
     st.session_state.drive_loaded = False
 
@@ -72,14 +76,14 @@ def get_drive_service():
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def list_drive_files(folder_id):
-    """List all Excel files in a Google Drive folder."""
+    """List all Excel and CSV files in a Google Drive folder."""
     service = get_drive_service()
     if not service:
         return []
 
     try:
         results = service.files().list(
-            q=f"'{folder_id}' in parents and (mimeType='application/vnd.ms-excel' or mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')",
+            q=f"'{folder_id}' in parents and (mimeType='application/vnd.ms-excel' or mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' or mimeType='text/csv')",
             fields="files(id, name, mimeType)"
         ).execute()
         return results.get('files', [])
@@ -108,31 +112,44 @@ def download_drive_file(file_id, file_name):
         return None
 
 def load_files_from_drive():
-    """Load booking and visit date files from Google Drive."""
+    """Load booking, visit date, and marketing files from Google Drive."""
     if "google_drive" not in st.secrets:
-        return None, None, "No Google Drive folder configured"
+        return None, None, None, None, "No Google Drive folder configured"
 
     folder_id = st.secrets["google_drive"]["folder_id"]
     files = list_drive_files(folder_id)
 
     if not files:
-        return None, None, "No Excel files found in Drive folder"
+        return None, None, None, None, "No files found in Drive folder"
 
-    # Separate files into booking creation and visit dates based on filename
+    # Separate files by type
     booking_files = []
     visit_files = []
+    google_ads_files = []
+    meta_ads_files = []
 
     for f in files:
         name_lower = f['name'].lower()
-        # Detect file type by name - adjust these patterns to match your file naming
-        if 'visit' in name_lower or 'start' in name_lower or 'datum' in name_lower:
+
+        # CSV files for marketing
+        if name_lower.endswith('.csv'):
+            if 'google' in name_lower:
+                google_ads_files.append(f)
+            elif 'meta' in name_lower:
+                meta_ads_files.append(f)
+            continue
+
+        # Excel files - Detect file type by name - matches Bookeo export naming
+        if 'date booked' in name_lower or 'dated booked' in name_lower:
+            # "the date booked" = when customer visited
+            visit_files.append(f)
+        elif 'day the booking was made' in name_lower or 'booking was made' in name_lower:
+            # "the day the booking was made" = when booking was created
+            booking_files.append(f)
+        elif 'visit' in name_lower or 'start' in name_lower or 'datum' in name_lower:
             visit_files.append(f)
         elif 'booking' in name_lower or 'created' in name_lower or 'boeking' in name_lower:
             booking_files.append(f)
-        else:
-            # If no clear pattern, try to categorize by other hints
-            # Default: files with numbers might be visit dates
-            visit_files.append(f)
 
     # Load and merge booking files
     df1 = None
@@ -166,7 +183,37 @@ def load_files_from_drive():
         if dfs:
             df2 = pd.concat(dfs, ignore_index=True)
 
-    return df1, df2, None
+    # Load Google Ads CSV files
+    google_ads_df = None
+    if google_ads_files:
+        dfs = []
+        for f in google_ads_files:
+            file_buffer = download_drive_file(f['id'], f['name'])
+            if file_buffer:
+                try:
+                    df = pd.read_csv(file_buffer)
+                    dfs.append(df)
+                except Exception as e:
+                    st.warning(f"Could not read {f['name']}: {e}")
+        if dfs:
+            google_ads_df = pd.concat(dfs, ignore_index=True)
+
+    # Load Meta Ads CSV files
+    meta_ads_df = None
+    if meta_ads_files:
+        dfs = []
+        for f in meta_ads_files:
+            file_buffer = download_drive_file(f['id'], f['name'])
+            if file_buffer:
+                try:
+                    df = pd.read_csv(file_buffer)
+                    dfs.append(df)
+                except Exception as e:
+                    st.warning(f"Could not read {f['name']}: {e}")
+        if dfs:
+            meta_ads_df = pd.concat(dfs, ignore_index=True)
+
+    return df1, df2, google_ads_df, meta_ads_df, None
 
 # Parse uploaded files
 @st.cache_data
@@ -221,7 +268,7 @@ st.sidebar.header("Data")
 if GOOGLE_DRIVE_AVAILABLE and "gcp_service_account" in st.secrets and "google_drive" in st.secrets:
     if not st.session_state.drive_loaded:
         with st.spinner("Loading data from Google Drive..."):
-            df1, df2, error = load_files_from_drive()
+            df1, df2, google_ads_df, meta_ads_df, error = load_files_from_drive()
             if error:
                 st.sidebar.warning(f"Drive: {error}")
             else:
@@ -229,6 +276,10 @@ if GOOGLE_DRIVE_AVAILABLE and "gcp_service_account" in st.secrets and "google_dr
                     st.session_state.df1 = df1
                 if df2 is not None:
                     st.session_state.df2 = df2
+                if google_ads_df is not None:
+                    st.session_state.google_ads_df = google_ads_df
+                if meta_ads_df is not None:
+                    st.session_state.meta_ads_df = meta_ads_df
                 st.session_state.drive_loaded = True
 
     # Show loaded status
@@ -236,6 +287,10 @@ if GOOGLE_DRIVE_AVAILABLE and "gcp_service_account" in st.secrets and "google_dr
         st.sidebar.success(f"Booking data: {len(st.session_state.df1):,} rows")
     if st.session_state.df2 is not None:
         st.sidebar.success(f"Visit data: {len(st.session_state.df2):,} rows")
+    if st.session_state.google_ads_df is not None:
+        st.sidebar.success(f"Google Ads: {len(st.session_state.google_ads_df):,} rows")
+    if st.session_state.meta_ads_df is not None:
+        st.sidebar.success(f"Meta Ads: {len(st.session_state.meta_ads_df):,} rows")
 
     # Manual upload option (in expander)
     with st.sidebar.expander("Upload different files"):
