@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import requests
 import numpy as np
 from io import BytesIO
+import time
 
 # Google Drive imports
 try:
@@ -297,20 +298,37 @@ st.sidebar.header("Data")
 # Try to load from Google Drive automatically
 if GOOGLE_DRIVE_AVAILABLE and "gcp_service_account" in st.secrets and "google_drive" in st.secrets:
     if not st.session_state.drive_loaded:
-        with st.spinner("Loading data from Google Drive..."):
-            df1, df2, google_ads_df, meta_ads_df, error = load_files_from_drive()
-            if error:
-                st.sidebar.warning(f"Drive: {error}")
-            else:
-                if df1 is not None:
-                    st.session_state.df1 = df1
-                if df2 is not None:
-                    st.session_state.df2 = df2
-                if google_ads_df is not None:
-                    st.session_state.google_ads_df = google_ads_df
-                if meta_ads_df is not None:
-                    st.session_state.meta_ads_df = meta_ads_df
-                st.session_state.drive_loaded = True
+        progress_bar = st.sidebar.progress(0, text="Connecting to Google Drive...")
+
+        # Animate progress while loading
+        progress_bar.progress(10, text="Connecting to Google Drive...")
+        df1, df2, google_ads_df, meta_ads_df, error = load_files_from_drive()
+
+        if error:
+            progress_bar.empty()
+            st.sidebar.warning(f"Drive: {error}")
+        else:
+            progress_bar.progress(50, text="Processing booking data...")
+            time.sleep(0.2)
+            if df1 is not None:
+                st.session_state.df1 = df1
+
+            progress_bar.progress(70, text="Processing visit data...")
+            time.sleep(0.2)
+            if df2 is not None:
+                st.session_state.df2 = df2
+
+            progress_bar.progress(85, text="Processing marketing data...")
+            time.sleep(0.2)
+            if google_ads_df is not None:
+                st.session_state.google_ads_df = google_ads_df
+            if meta_ads_df is not None:
+                st.session_state.meta_ads_df = meta_ads_df
+
+            progress_bar.progress(100, text="Complete!")
+            time.sleep(0.3)
+            progress_bar.empty()
+            st.session_state.drive_loaded = True
 
     # Show loaded status
     if st.session_state.df1 is not None:
