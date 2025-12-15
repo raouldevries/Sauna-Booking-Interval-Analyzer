@@ -1615,7 +1615,21 @@ else:
 
                 # Build capacity data
                 capacity_data = []
-                num_weeks = 4  # Assume November = 4 weeks
+
+                # Calculate num_weeks dynamically based on booking data date range
+                num_weeks = 4  # Default
+                if st.session_state.df1 is not None:
+                    df1_temp = st.session_state.df1
+                    date_col = None
+                    for col in ['Start', 'Created', 'Date', 'Booking date']:
+                        if col in df1_temp.columns:
+                            date_col = col
+                            break
+                    if date_col:
+                        dates = pd.to_datetime(df1_temp[date_col], errors='coerce').dropna()
+                        if len(dates) > 0:
+                            date_range_days = (dates.max() - dates.min()).days + 1
+                            num_weeks = max(1, date_range_days // 7)  # At least 1 week
 
                 for loc in loc_summary['Location'].tolist():
                     cap_info = get_capacity_per_location(loc, num_weeks)
@@ -1624,13 +1638,17 @@ else:
 
                     if cap_info and cap_info['period_total'] > 0:
                         occupancy = (bookings / cap_info['period_total'] * 100) if cap_info['period_total'] > 0 else 0
+                        available = cap_info['period_total'] - bookings
+                        # Cap occupancy at 100% and available at 0
+                        occupancy = min(occupancy, 100)
+                        available = max(available, 0)
                         capacity_data.append({
                             'Location': loc,
                             'Capacity': cap_info['period_total'],
                             'Bookings': bookings,
                             'Occupancy': occupancy,
                             'Ad Spend': ad_spend,
-                            'Available': cap_info['period_total'] - bookings,
+                            'Available': available,
                             'Cost/Slot': ad_spend / bookings if bookings > 0 else 0
                         })
 
