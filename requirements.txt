@@ -6,3 +6,5 @@ plotly
 requests
 numpy
 meteostat
+google-api-python-client
+google-auth

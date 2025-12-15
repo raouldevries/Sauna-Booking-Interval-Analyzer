@@ -5,6 +5,16 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import requests
 import numpy as np
+from io import BytesIO
+
+# Google Drive imports
+try:
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+    from googleapiclient.http import MediaIoBaseDownload
+    GOOGLE_DRIVE_AVAILABLE = True
+except ImportError:
+    GOOGLE_DRIVE_AVAILABLE = False
 
 # Page configuration
 st.set_page_config(
@@ -39,6 +49,124 @@ if 'df1' not in st.session_state:
     st.session_state.df1 = None
 if 'df2' not in st.session_state:
     st.session_state.df2 = None
+if 'drive_loaded' not in st.session_state:
+    st.session_state.drive_loaded = False
+
+# Google Drive functions
+@st.cache_resource
+def get_drive_service():
+    """Connect to Google Drive using service account credentials."""
+    if not GOOGLE_DRIVE_AVAILABLE:
+        return None
+
+    try:
+        credentials = service_account.Credentials.from_service_account_info(
+            st.secrets["gcp_service_account"],
+            scopes=['https://www.googleapis.com/auth/drive.readonly']
+        )
+        service = build('drive', 'v3', credentials=credentials)
+        return service
+    except Exception as e:
+        st.error(f"Failed to connect to Google Drive: {e}")
+        return None
+
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def list_drive_files(folder_id):
+    """List all Excel files in a Google Drive folder."""
+    service = get_drive_service()
+    if not service:
+        return []
+
+    try:
+        results = service.files().list(
+            q=f"'{folder_id}' in parents and (mimeType='application/vnd.ms-excel' or mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')",
+            fields="files(id, name, mimeType)"
+        ).execute()
+        return results.get('files', [])
+    except Exception as e:
+        st.error(f"Failed to list Drive files: {e}")
+        return []
+
+def download_drive_file(file_id, file_name):
+    """Download a file from Google Drive and return as BytesIO."""
+    service = get_drive_service()
+    if not service:
+        return None
+
+    try:
+        request = service.files().get_media(fileId=file_id)
+        file_buffer = BytesIO()
+        downloader = MediaIoBaseDownload(file_buffer, request)
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+        file_buffer.seek(0)
+        file_buffer.name = file_name  # Add name attribute for file type detection
+        return file_buffer
+    except Exception as e:
+        st.error(f"Failed to download {file_name}: {e}")
+        return None
+
+def load_files_from_drive():
+    """Load booking and visit date files from Google Drive."""
+    if "google_drive" not in st.secrets:
+        return None, None, "No Google Drive folder configured"
+
+    folder_id = st.secrets["google_drive"]["folder_id"]
+    files = list_drive_files(folder_id)
+
+    if not files:
+        return None, None, "No Excel files found in Drive folder"
+
+    # Separate files into booking creation and visit dates based on filename
+    booking_files = []
+    visit_files = []
+
+    for f in files:
+        name_lower = f['name'].lower()
+        # Detect file type by name - adjust these patterns to match your file naming
+        if 'visit' in name_lower or 'start' in name_lower or 'datum' in name_lower:
+            visit_files.append(f)
+        elif 'booking' in name_lower or 'created' in name_lower or 'boeking' in name_lower:
+            booking_files.append(f)
+        else:
+            # If no clear pattern, try to categorize by other hints
+            # Default: files with numbers might be visit dates
+            visit_files.append(f)
+
+    # Load and merge booking files
+    df1 = None
+    if booking_files:
+        dfs = []
+        for f in booking_files:
+            file_buffer = download_drive_file(f['id'], f['name'])
+            if file_buffer:
+                try:
+                    engine = 'xlrd' if f['name'].endswith('.xls') else 'openpyxl'
+                    df = pd.read_excel(file_buffer, engine=engine)
+                    dfs.append(df)
+                except Exception as e:
+                    st.warning(f"Could not read {f['name']}: {e}")
+        if dfs:
+            df1 = pd.concat(dfs, ignore_index=True)
+
+    # Load and merge visit files
+    df2 = None
+    if visit_files:
+        dfs = []
+        for f in visit_files:
+            file_buffer = download_drive_file(f['id'], f['name'])
+            if file_buffer:
+                try:
+                    engine = 'xlrd' if f['name'].endswith('.xls') else 'openpyxl'
+                    df = pd.read_excel(file_buffer, engine=engine)
+                    dfs.append(df)
+                except Exception as e:
+                    st.warning(f"Could not read {f['name']}: {e}")
+        if dfs:
+            df2 = pd.concat(dfs, ignore_index=True)
+
+    return df1, df2, None
 
 # Parse uploaded files
 @st.cache_data
@@ -86,55 +214,114 @@ def load_and_merge_files(uploaded_files):
 # Reserve container for navigation at top of sidebar
 nav_container = st.sidebar.container()
 
-# Sidebar - Upload section
-st.sidebar.header("Upload & Configure")
+# Sidebar - Data section
+st.sidebar.header("Data")
 
-# File uploaders with multiple file support
-uploaded_files1 = st.sidebar.file_uploader(
-    "Booking Creation Dates (.xls/.xlsx)",
-    type=["xls", "xlsx"],
-    help="Upload files containing when bookings were created. You can select multiple files from different Bookeo instances.",
-    accept_multiple_files=True
-)
+# Try to load from Google Drive automatically
+if GOOGLE_DRIVE_AVAILABLE and "gcp_service_account" in st.secrets and "google_drive" in st.secrets:
+    if not st.session_state.drive_loaded:
+        with st.spinner("Loading data from Google Drive..."):
+            df1, df2, error = load_files_from_drive()
+            if error:
+                st.sidebar.warning(f"Drive: {error}")
+            else:
+                if df1 is not None:
+                    st.session_state.df1 = df1
+                if df2 is not None:
+                    st.session_state.df2 = df2
+                st.session_state.drive_loaded = True
 
-uploaded_files2 = st.sidebar.file_uploader(
-    "Visit Dates (.xls/.xlsx)",
-    type=["xls", "xlsx"],
-    help="Upload files containing when customers actually visited. You can select multiple files from different Bookeo instances.",
-    accept_multiple_files=True
-)
+    # Show loaded status
+    if st.session_state.df1 is not None:
+        st.sidebar.success(f"Booking data: {len(st.session_state.df1):,} rows")
+    if st.session_state.df2 is not None:
+        st.sidebar.success(f"Visit data: {len(st.session_state.df2):,} rows")
 
-# Load and merge File 1 (Booking Creation Dates)
-if uploaded_files1:
-    df1, errors1, file_info1 = load_and_merge_files(uploaded_files1)
-    if errors1:
-        for error in errors1:
-            st.sidebar.error(f"Error: {error}")
-    elif df1 is not None:
-        st.session_state.df1 = df1
-        if len(file_info1) == 1:
-            st.sidebar.success(f"Loaded: {len(df1):,} rows")
-        else:
-            st.sidebar.success(f"Merged {len(file_info1)} files: {len(df1):,} total rows")
-            with st.sidebar.expander("File details"):
-                for info in file_info1:
-                    st.write(f"- {info}")
+    # Manual upload option (in expander)
+    with st.sidebar.expander("Upload different files"):
+        uploaded_files1 = st.file_uploader(
+            "Booking Creation Dates (.xls/.xlsx)",
+            type=["xls", "xlsx"],
+            help="Upload files to replace Google Drive data",
+            accept_multiple_files=True,
+            key="manual_upload_1"
+        )
 
-# Load and merge File 2 (Visit Dates)
-if uploaded_files2:
-    df2, errors2, file_info2 = load_and_merge_files(uploaded_files2)
-    if errors2:
-        for error in errors2:
-            st.sidebar.error(f"Error: {error}")
-    elif df2 is not None:
-        st.session_state.df2 = df2
-        if len(file_info2) == 1:
-            st.sidebar.success(f"Loaded: {len(df2):,} rows")
-        else:
-            st.sidebar.success(f"Merged {len(file_info2)} files: {len(df2):,} total rows")
-            with st.sidebar.expander("File details"):
-                for info in file_info2:
-                    st.write(f"- {info}")
+        uploaded_files2 = st.file_uploader(
+            "Visit Dates (.xls/.xlsx)",
+            type=["xls", "xlsx"],
+            help="Upload files to replace Google Drive data",
+            accept_multiple_files=True,
+            key="manual_upload_2"
+        )
+
+        if uploaded_files1:
+            df1, errors1, file_info1 = load_and_merge_files(uploaded_files1)
+            if errors1:
+                for error in errors1:
+                    st.error(f"Error: {error}")
+            elif df1 is not None:
+                st.session_state.df1 = df1
+                st.success(f"Loaded: {len(df1):,} rows")
+
+        if uploaded_files2:
+            df2, errors2, file_info2 = load_and_merge_files(uploaded_files2)
+            if errors2:
+                for error in errors2:
+                    st.error(f"Error: {error}")
+            elif df2 is not None:
+                st.session_state.df2 = df2
+                st.success(f"Loaded: {len(df2):,} rows")
+
+else:
+    # No Google Drive configured - show standard upload
+    st.sidebar.info("Upload your Bookeo export files")
+
+    uploaded_files1 = st.sidebar.file_uploader(
+        "Booking Creation Dates (.xls/.xlsx)",
+        type=["xls", "xlsx"],
+        help="Upload files containing when bookings were created. You can select multiple files from different Bookeo instances.",
+        accept_multiple_files=True
+    )
+
+    uploaded_files2 = st.sidebar.file_uploader(
+        "Visit Dates (.xls/.xlsx)",
+        type=["xls", "xlsx"],
+        help="Upload files containing when customers actually visited. You can select multiple files from different Bookeo instances.",
+        accept_multiple_files=True
+    )
+
+    # Load and merge File 1 (Booking Creation Dates)
+    if uploaded_files1:
+        df1, errors1, file_info1 = load_and_merge_files(uploaded_files1)
+        if errors1:
+            for error in errors1:
+                st.sidebar.error(f"Error: {error}")
+        elif df1 is not None:
+            st.session_state.df1 = df1
+            if len(file_info1) == 1:
+                st.sidebar.success(f"Loaded: {len(df1):,} rows")
+            else:
+                st.sidebar.success(f"Merged {len(file_info1)} files: {len(df1):,} total rows")
+                with st.sidebar.expander("File details"):
+                    for info in file_info1:
+                        st.write(f"- {info}")
+
+    # Load and merge File 2 (Visit Dates)
+    if uploaded_files2:
+        df2, errors2, file_info2 = load_and_merge_files(uploaded_files2)
+        if errors2:
+            for error in errors2:
+                st.sidebar.error(f"Error: {error}")
+        elif df2 is not None:
+            st.session_state.df2 = df2
+            if len(file_info2) == 1:
+                st.sidebar.success(f"Loaded: {len(df2):,} rows")
+            else:
+                st.sidebar.success(f"Merged {len(file_info2)} files: {len(df2):,} total rows")
+                with st.sidebar.expander("File details"):
+                    for info in file_info2:
+                        st.write(f"- {info}")
 
 # Fill navigation container (now that files are loaded)
 if st.session_state.df1 is not None and st.session_state.df2 is not None:
