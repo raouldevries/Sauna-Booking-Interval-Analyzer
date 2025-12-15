@@ -558,6 +558,10 @@ if st.session_state.google_ads_df is None and st.session_state.meta_ads_df is No
     - **CARE**: Loyalty stage - retaining customers (Retargeting, Remarketing campaigns)
     """)
 else:
+    # Show loading message while processing
+    loading_placeholder = st.empty()
+    loading_placeholder.info("Loading marketing analysis...")
+
     # Combine data from both platforms
     dfs_to_combine = []
 
@@ -684,6 +688,9 @@ else:
                     )
                     # Keep rows without dates OR rows that pass the date filter
                     combined_df = combined_df[~has_dates | date_filter]
+
+        # Clear loading message now that data is ready
+        loading_placeholder.empty()
 
         # Key Metrics
         st.markdown("### Key Metrics")
