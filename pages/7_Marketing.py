@@ -1615,30 +1615,25 @@ else:
                 # Build capacity data
                 capacity_data = []
 
-                # Calculate num_weeks dynamically based on booking data date range
+                # Use the selected date range from the date picker (same as marketing filter)
                 num_weeks = 4  # Default
-                date_range_str = ""
-                min_date = None
-                max_date = None
-                if st.session_state.df1 is not None:
-                    df1_temp = st.session_state.df1
-                    date_col = None
-                    for col in ['Start', 'Created', 'Date', 'Booking date']:
-                        if col in df1_temp.columns:
-                            date_col = col
-                            break
-                    if date_col:
-                        dates = pd.to_datetime(df1_temp[date_col], errors='coerce').dropna()
-                        if len(dates) > 0:
-                            min_date = dates.min()
-                            max_date = dates.max()
-                            date_range_days = (max_date - min_date).days + 1
-                            num_weeks = max(1, date_range_days // 7)  # At least 1 week
-                            date_range_str = f"{min_date.strftime('%b %d')} - {max_date.strftime('%b %d, %Y')}"
+                cap_date_range_str = ""
+                if 'date_range' in dir() and len(date_range) == 2:
+                    # Use selected date range from filter
+                    cap_start_date = pd.Timestamp(date_range[0])
+                    cap_end_date = pd.Timestamp(date_range[1])
+                    date_range_days = (cap_end_date - cap_start_date).days + 1
+                    num_weeks = max(1, date_range_days // 7)  # At least 1 week
+                    cap_date_range_str = f"{cap_start_date.strftime('%b %d')} - {cap_end_date.strftime('%b %d, %Y')}"
+                elif pd.notna(data_min_date) and pd.notna(data_max_date):
+                    # Fallback to full data range
+                    date_range_days = (data_max_date - data_min_date).days + 1
+                    num_weeks = max(1, date_range_days // 7)
+                    cap_date_range_str = f"{data_min_date.strftime('%b %d')} - {data_max_date.strftime('%b %d, %Y')}"
 
                 # Show period info
-                if date_range_str:
-                    st.caption(f"**Period:** {date_range_str} ({num_weeks} weeks) · Capacity = weekly capacity × {num_weeks} weeks")
+                if cap_date_range_str:
+                    st.caption(f"**Period:** {cap_date_range_str} ({num_weeks} weeks) · Capacity = weekly capacity × {num_weeks} weeks")
                 else:
                     st.caption(f"Compare marketing investment with location capacity utilization ({num_weeks} weeks)")
 
