@@ -31,13 +31,14 @@ st.markdown(hide_default_nav, unsafe_allow_html=True)
 
 # Location keyword mapping for filtering campaigns
 # Maps campaign keywords to display names
-# Note: Generic keywords like 'nijmegen' or 'rotterdam' map to the main/first location
+# Note: Campaigns often target multiple locations like "Amsterdam M, IJ, N & Sloterplas"
+# Use patterns that match these abbreviated formats
 LOCATION_KEYWORDS = {
-    'Marineterrein Matsu': ['matsu'],
-    'Marineterrein Bjørk': ['bjørk', 'bjork'],
+    'Marineterrein Matsu': ['matsu', ' m,', ' m ', '& m ', ', m&', 'marine', 'marineterrein'],  # Matches "M," in campaign names
+    'Marineterrein Bjørk': ['bjørk', 'bjork', 'marine', 'marineterrein'],  # Also matches generic "marine" campaigns
     'Amsterdam Sloterplas': ['sloterplas', 'sloterpas'],
-    'Amsterdam Noord': ['amsterdam n', '| amsterdam n'],
-    'Amsterdam IJ': ['amsterdam ij', 'aan t ij', 'aan \'t ij', 'centrum'],
+    'Amsterdam Noord': [' n ', ' n,', ' n&', '& n ', ', n,', 'noord'],  # Matches "N" in "M, IJ, N &"
+    'Amsterdam IJ': ['ij ', ', ij', '& ij', 'ij,', 'ij&', 'amsterdam ij', 'aan t ij', 'centrum'],  # Matches "IJ" patterns
     'Nijmegen Lent': ['nijmegen lent', 'lent', 'nijmegen'],  # Generic 'nijmegen' maps here
     'Nijmegen NYMA': ['nijmegen nyma', 'nyma'],
     'Rotterdam Rijnhaven': ['rijnhaven', 'rotterdam'],  # Generic 'rotterdam' maps here
@@ -45,7 +46,7 @@ LOCATION_KEYWORDS = {
     'Scheveningen': ['scheveningen'],
     'Den Bosch': ['den bosch', 'denbosch'],
     'Katwijk': ['katwijk'],
-    'Wijk aan Zee': ['wijk aan zee'],
+    'Wijk aan Zee': ['wijk aan zee', 'wijk'],
     'Bloemendaal': ['bloemendaal'],
 }
 
@@ -142,7 +143,7 @@ def suggest_stdc_phase(campaign_name):
 
 
 def campaign_matches_location(campaign_name, locations=None):
-    """Check if campaign name contains any location keywords."""
+    """Check if campaign name contains any location keywords. Returns first match."""
     if pd.isna(campaign_name) or not isinstance(campaign_name, str):
         return None
 
@@ -158,6 +159,29 @@ def campaign_matches_location(campaign_name, locations=None):
             if keyword in name_lower:
                 return location
     return None
+
+
+def campaign_matches_all_locations(campaign_name):
+    """Return ALL locations that match a campaign name (for multi-location campaigns).
+    Note: Returns empty list for 'alle locaties' campaigns - these are handled separately."""
+    if pd.isna(campaign_name) or not isinstance(campaign_name, str):
+        return []
+
+    name_lower = campaign_name.lower()
+
+    # "Alle locaties" campaigns are handled separately in the "All locations" row
+    if 'alle locaties' in name_lower or 'all locations' in name_lower:
+        return []
+
+    # Find all matching locations
+    matched_locations = []
+    for location, keywords in LOCATION_KEYWORDS.items():
+        for keyword in keywords:
+            if keyword in name_lower:
+                matched_locations.append(location)
+                break  # Only add each location once
+
+    return matched_locations
 
 
 def get_revenue_per_location(df1, location_col='Tour', revenue_col='Total gross', split_marine=False):
@@ -1260,588 +1284,6 @@ else:
                     st.session_state.stdc_tags[campaign] = suggest_stdc_phase(campaign)
                 st.rerun()
 
-        # Location Performance - analyze all campaigns by location
-        st.markdown("---")
-        st.markdown("### Performance by Location")
-
-        # Map campaigns to locations with all metrics
-        location_data = []
-        for _, row in combined_df.iterrows():
-            campaign_name = row.get('campaign_name', '')
-            match = campaign_matches_location(campaign_name)
-            if match and match != 'all':
-                # Get reach (impressions for Google, reach for Meta)
-                reach = row.get('impressions', 0) if row.get('Platform') == 'Google Ads' else row.get('reach', 0)
-                location_data.append({
-                    'Location': match,
-                    'Spend': row.get('spend', 0),
-                    'Reach': reach,
-                    'Clicks': row.get('clicks', 0),
-                    'Conversions': row.get('conversions', 0),
-                    'Value': row.get('conversion_value', 0)
-                })
-
-        if location_data:
-            loc_df = pd.DataFrame(location_data)
-
-            # Aggregate by location (excluding "All Locations")
-            loc_summary = loc_df.groupby('Location').agg({
-                'Spend': 'sum',
-                'Reach': 'sum',
-                'Clicks': 'sum',
-                'Conversions': 'sum',
-                'Value': 'sum'
-            }).reset_index()
-
-            # Calculate efficiency metrics
-            loc_summary['CTR'] = loc_summary.apply(
-                lambda x: (x['Clicks'] / x['Reach'] * 100) if x['Reach'] > 0 else 0, axis=1
-            )
-            loc_summary['CPA'] = loc_summary.apply(
-                lambda x: x['Spend'] / x['Conversions'] if x['Conversions'] > 0 else 0, axis=1
-            )
-            loc_summary['ROAS'] = loc_summary.apply(
-                lambda x: x['Value'] / x['Spend'] if x['Spend'] > 0 else 0, axis=1
-            )
-
-            # Calculate totals for marketing
-            total_spend = loc_summary['Spend'].sum()
-            total_reach = loc_summary['Reach'].sum()
-            total_clicks = loc_summary['Clicks'].sum()
-            total_conv = loc_summary['Conversions'].sum()
-            total_value = loc_summary['Value'].sum()
-            avg_ctr = (total_clicks / total_reach * 100) if total_reach > 0 else 0
-            avg_cpa = total_spend / total_conv if total_conv > 0 else 0
-            avg_roas = total_value / total_spend if total_spend > 0 else 0
-
-            # Get revenue data from booking files (filtered by selected date range)
-            revenue_data = {}
-            if st.session_state.df1 is not None:
-                df1 = st.session_state.df1.copy()
-                location_col = 'Location' if 'Location' in df1.columns else ('Tour' if 'Tour' in df1.columns else ('Activity' if 'Activity' in df1.columns else None))
-                revenue_col = 'Total gross' if 'Total gross' in df1.columns else None
-
-                # Filter df1 by selected date range if available
-                if 'date_range' in dir() and len(date_range) == 2:
-                    date_col = None
-                    for col in ['Start', 'Created', 'Date', 'Booking date']:
-                        if col in df1.columns:
-                            date_col = col
-                            break
-                    if date_col:
-                        df1[date_col] = pd.to_datetime(df1[date_col], errors='coerce')
-                        start_date = pd.Timestamp(date_range[0])
-                        end_date = pd.Timestamp(date_range[1])
-                        df1 = df1[(df1[date_col] >= start_date) & (df1[date_col] <= end_date)]
-
-                if location_col:
-                    revenue_data = get_revenue_per_location(df1, location_col, revenue_col)
-
-            # ===== TABBED INTERFACE =====
-            tab1, tab2, tab3 = st.tabs(["Marketing", "Revenue & Efficiency", "Capacity"])
-
-            # ===== TAB 1: MARKETING =====
-            with tab1:
-                st.markdown("#### Marketing Performance Table")
-
-                # Prepare display table
-                table_df = loc_summary.copy()
-                # Filter out any existing TOTAL row before sorting
-                table_df = table_df[table_df['Location'] != 'TOTAL']
-                table_df = table_df.sort_values('CPA', ascending=True)
-
-                table_display = table_df.copy()
-                table_display['Spend'] = table_display['Spend'].apply(lambda x: f"€{x:,.0f}")
-                table_display['Reach'] = table_display['Reach'].apply(lambda x: f"{x/1000:,.0f}K" if x >= 1000 else f"{x:,.0f}")
-                table_display['Clicks'] = table_display['Clicks'].apply(lambda x: f"{x:,.0f}")
-                table_display['Conv'] = table_display['Conversions'].apply(lambda x: f"{x:,.0f}")
-                table_display['Value'] = table_display['Value'].apply(lambda x: f"€{x:,.0f}" if x > 0 else "-")
-                table_display['CTR'] = table_display['CTR'].apply(lambda x: f"{x:.2f}%")
-                table_display['CPA'] = table_display['CPA'].apply(lambda x: f"€{x:,.0f}" if x > 0 else "-")
-                table_display['ROAS'] = table_display['ROAS'].apply(lambda x: f"{x:.1f}x" if x > 0 else "-")
-
-                # Select and order columns
-                table_display = table_display[['Location', 'Spend', 'Reach', 'Clicks', 'Conv', 'Value', 'CTR', 'CPA', 'ROAS']]
-
-                total_row = pd.DataFrame({
-                    'Location': ['TOTAL'],
-                    'Spend': [f"€{total_spend:,.0f}"],
-                    'Reach': [f"{total_reach/1000:,.0f}K" if total_reach >= 1000 else f"{total_reach:,.0f}"],
-                    'Clicks': [f"{total_clicks:,.0f}"],
-                    'Conv': [f"{total_conv:,.0f}"],
-                    'Value': [f"€{total_value:,.0f}" if total_value > 0 else "-"],
-                    'CTR': [f"{avg_ctr:.2f}%"],
-                    'CPA': [f"€{avg_cpa:,.0f}" if avg_cpa > 0 else "-"],
-                    'ROAS': [f"{avg_roas:.1f}x" if avg_roas > 0 else "-"]
-                })
-                table_display = pd.concat([table_display, total_row], ignore_index=True)
-
-                # Column config with help tooltips
-                marketing_column_config = {
-                    'Location': st.column_config.TextColumn('Location'),
-                    'Spend': st.column_config.TextColumn('Spend', help='Total ad spend per location'),
-                    'Reach': st.column_config.TextColumn('Reach', help='People who saw ads (impressions for Google, reach for Meta)'),
-                    'Clicks': st.column_config.TextColumn('Clicks', help='Link clicks on ads'),
-                    'Conv': st.column_config.TextColumn('Conv', help='Purchases/conversions tracked by ad platforms'),
-                    'Value': st.column_config.TextColumn('Value', help='Conversion value reported by ad platforms'),
-                    'CTR': st.column_config.TextColumn('CTR', help='Click-through rate = Clicks / Reach'),
-                    'CPA': st.column_config.TextColumn('CPA', help='Cost per Acquisition = Spend / Conversions'),
-                    'ROAS': st.column_config.TextColumn('ROAS', help='Return on Ad Spend = Value / Spend'),
-                }
-
-                # Style TOTAL row
-                def highlight_total(row):
-                    if row['Location'] == 'TOTAL':
-                        return ['font-weight: bold; background-color: #f3f4f6'] * len(row)
-                    return [''] * len(row)
-
-                styled_table = table_display.style.apply(highlight_total, axis=1)
-                st.dataframe(styled_table, use_container_width=True, hide_index=True, column_config=marketing_column_config)
-
-                # CPA Comparison Chart
-                st.markdown("#### Cost per Conversion by Location")
-                cpa_df = loc_summary[loc_summary['Conversions'] > 0].copy()
-                cpa_df = cpa_df.sort_values('CPA', ascending=True)
-
-                if len(cpa_df) > 0:
-                    min_cpa = cpa_df['CPA'].min()
-                    max_cpa = cpa_df['CPA'].max()
-
-                    def get_cpa_color(cpa):
-                        if max_cpa == min_cpa:
-                            return '#22c55e'
-                        ratio = (cpa - min_cpa) / (max_cpa - min_cpa)
-                        if ratio < 0.5:
-                            r = int(34 + (250 - 34) * (ratio * 2))
-                            g = int(197 - (197 - 204) * (ratio * 2))
-                            b = int(94 - 94 * (ratio * 2))
-                        else:
-                            r = int(250 - (250 - 239) * ((ratio - 0.5) * 2))
-                            g = int(204 - (204 - 68) * ((ratio - 0.5) * 2))
-                            b = int(0 + 68 * ((ratio - 0.5) * 2))
-                        return f'rgb({r},{g},{b})'
-
-                    cpa_df['color'] = cpa_df['CPA'].apply(get_cpa_color)
-                    cpa_df['label'] = cpa_df.apply(
-                        lambda x: f"€{x['CPA']:,.0f} (Best)" if x['CPA'] == min_cpa else f"€{x['CPA']:,.0f}",
-                        axis=1
-                    )
-
-                    fig_cpa = go.Figure()
-                    fig_cpa.add_trace(go.Bar(
-                        y=cpa_df['Location'],
-                        x=cpa_df['CPA'],
-                        orientation='h',
-                        marker_color=cpa_df['color'],
-                        text=cpa_df['label'],
-                        textposition='outside',
-                        hovertemplate='%{y}: €%{x:,.2f}<extra></extra>'
-                    ))
-                    fig_cpa.add_vline(x=avg_cpa, line_dash="dash", line_color="#666",
-                                      annotation_text=f"Avg: €{avg_cpa:,.0f}", annotation_position="top")
-                    fig_cpa.update_layout(
-                        height=max(300, len(cpa_df) * 50),
-                        margin=dict(l=20, r=120, t=50, b=40),
-                        xaxis_title='CPA (€)',
-                        yaxis=dict(categoryorder='total ascending'),
-                        showlegend=False
-                    )
-                    st.plotly_chart(fig_cpa, use_container_width=True)
-
-            # ===== TAB 2: REVENUE & EFFICIENCY =====
-            with tab2:
-                # Get revenue data with Marine split into Matsu and Bjørk
-                revenue_data_split = {}
-                if st.session_state.df1 is not None:
-                    revenue_data_split = get_revenue_per_location(df1, location_col, revenue_col, split_marine=True)
-
-                if revenue_data_split:
-                    st.markdown("#### Revenue & Marketing Efficiency")
-                    st.caption("Showing correlation between marketing spend and actual revenue (not causation)")
-
-                    # Get Amsterdam Marine ad spend/conv for proportional split
-                    marine_spend = 0
-                    marine_conv = 0
-                    if 'Amsterdam Marine' in loc_summary['Location'].values:
-                        marine_row = loc_summary[loc_summary['Location'] == 'Amsterdam Marine']
-                        marine_spend = marine_row['Spend'].values[0]
-                        marine_conv = marine_row['Conversions'].values[0]
-
-                    # Calculate total revenue for Marine locations (for proportional split)
-                    marine_total_revenue = 0
-                    for loc, data in revenue_data_split.items():
-                        if data.get('parent_marketing_loc') == 'Amsterdam Marine':
-                            marine_total_revenue += data['revenue']
-
-                    # Build combined table
-                    efficiency_data = []
-                    added_locations = set()
-
-                    # First add non-Marine locations from loc_summary (marketing data)
-                    for loc in loc_summary['Location'].tolist():
-                        if loc == 'Amsterdam Marine':
-                            continue  # Skip - will add Matsu and Bjørk separately
-                        row_data = {
-                            'Location': loc,
-                            'Ad Spend': loc_summary[loc_summary['Location'] == loc]['Spend'].values[0],
-                            'Ad Conv': loc_summary[loc_summary['Location'] == loc]['Conversions'].values[0],
-                        }
-                        if loc in revenue_data_split:
-                            row_data['Bookings'] = revenue_data_split[loc]['bookings']
-                            row_data['Revenue'] = revenue_data_split[loc]['revenue']
-                        else:
-                            row_data['Bookings'] = 0
-                            row_data['Revenue'] = 0
-                        efficiency_data.append(row_data)
-                        added_locations.add(loc)
-
-                    # Add Matsu and Bjørk with proportional ad spend split
-                    for loc, data in revenue_data_split.items():
-                        if data.get('parent_marketing_loc') == 'Amsterdam Marine':
-                            # Split ad spend proportionally by revenue
-                            if marine_total_revenue > 0:
-                                revenue_share = data['revenue'] / marine_total_revenue
-                            else:
-                                revenue_share = 0.5  # Default to 50/50 if no revenue
-                            row_data = {
-                                'Location': loc,
-                                'Ad Spend': marine_spend * revenue_share,
-                                'Ad Conv': marine_conv * revenue_share,
-                                'Bookings': data['bookings'],
-                                'Revenue': data['revenue'],
-                            }
-                            efficiency_data.append(row_data)
-                            added_locations.add(loc)
-
-                    # Add locations with revenue data but no marketing data
-                    for loc, data in revenue_data_split.items():
-                        if loc not in added_locations and not data.get('parent_marketing_loc'):
-                            row_data = {
-                                'Location': loc,
-                                'Ad Spend': 0,
-                                'Ad Conv': 0,
-                                'Bookings': data['bookings'],
-                                'Revenue': data['revenue'],
-                            }
-                            efficiency_data.append(row_data)
-
-                    eff_df = pd.DataFrame(efficiency_data)
-
-                    # Calculate efficiency metrics
-                    eff_df['Marketing %'] = eff_df.apply(
-                        lambda x: (x['Ad Spend'] / x['Revenue'] * 100) if x['Revenue'] > 0 else 0, axis=1
-                    )
-                    eff_df['Ad Share'] = eff_df.apply(
-                        lambda x: (x['Ad Conv'] / x['Bookings'] * 100) if x['Bookings'] > 0 else 0, axis=1
-                    )
-                    eff_df['Revenue/€ Spent'] = eff_df.apply(
-                        lambda x: x['Revenue'] / x['Ad Spend'] if x['Ad Spend'] > 0 else 0, axis=1
-                    )
-                    eff_df['Blended CAC'] = eff_df.apply(
-                        lambda x: x['Ad Spend'] / x['Bookings'] if x['Bookings'] > 0 else 0, axis=1
-                    )
-
-                    # Sort by Revenue/€ Spent (efficiency)
-                    eff_df = eff_df.sort_values('Revenue/€ Spent', ascending=False)
-
-                    # Calculate totals
-                    total_ad_spend = eff_df['Ad Spend'].sum()
-                    total_ad_conv = eff_df['Ad Conv'].sum()
-                    total_bookings = eff_df['Bookings'].sum()
-                    total_revenue = eff_df['Revenue'].sum()
-                    total_marketing_pct = (total_ad_spend / total_revenue * 100) if total_revenue > 0 else 0
-                    total_ad_share = (total_ad_conv / total_bookings * 100) if total_bookings > 0 else 0
-                    total_rev_per_spend = total_revenue / total_ad_spend if total_ad_spend > 0 else 0
-                    total_blended_cac = total_ad_spend / total_bookings if total_bookings > 0 else 0
-
-                    # Format for display
-                    eff_display = eff_df.copy()
-                    eff_display['Ad Spend'] = eff_display['Ad Spend'].apply(lambda x: f"€{x:,.0f}")
-                    eff_display['Ad Conv'] = eff_display['Ad Conv'].apply(lambda x: f"{x:,.0f}")
-                    eff_display['Bookings'] = eff_display['Bookings'].apply(lambda x: f"{x:,.0f}")
-                    eff_display['Revenue'] = eff_display['Revenue'].apply(lambda x: f"€{x:,.0f}")
-                    eff_display['Marketing %'] = eff_display['Marketing %'].apply(lambda x: f"{x:.1f}%")
-                    eff_display['Ad Share'] = eff_display['Ad Share'].apply(lambda x: f"{x:.1f}%")
-                    eff_display['Rev/€ Spent'] = eff_display['Revenue/€ Spent'].apply(lambda x: f"€{x:.1f}")
-                    eff_display['Blended CAC'] = eff_display['Blended CAC'].apply(lambda x: f"€{x:.1f}")
-
-                    # Select columns
-                    eff_display = eff_display[['Location', 'Ad Spend', 'Ad Conv', 'Bookings', 'Revenue', 'Marketing %', 'Ad Share', 'Rev/€ Spent', 'Blended CAC']]
-
-                    # Add total row
-                    total_row_eff = pd.DataFrame({
-                        'Location': ['TOTAL'],
-                        'Ad Spend': [f"€{total_ad_spend:,.0f}"],
-                        'Ad Conv': [f"{total_ad_conv:,.0f}"],
-                        'Bookings': [f"{total_bookings:,.0f}"],
-                        'Revenue': [f"€{total_revenue:,.0f}"],
-                        'Marketing %': [f"{total_marketing_pct:.1f}%"],
-                        'Ad Share': [f"{total_ad_share:.1f}%"],
-                        'Rev/€ Spent': [f"€{total_rev_per_spend:.1f}"],
-                        'Blended CAC': [f"€{total_blended_cac:.1f}"]
-                    })
-                    eff_display = pd.concat([eff_display, total_row_eff], ignore_index=True)
-
-                    # Column config with help tooltips
-                    efficiency_column_config = {
-                        'Location': st.column_config.TextColumn('Location'),
-                        'Ad Spend': st.column_config.TextColumn('Ad Spend', help='Total marketing spend per location'),
-                        'Ad Conv': st.column_config.TextColumn('Ad Conv', help='Conversions tracked by ad platforms'),
-                        'Bookings': st.column_config.TextColumn('Bookings', help='Actual bookings from booking system'),
-                        'Revenue': st.column_config.TextColumn('Revenue', help='Total revenue from booking system'),
-                        'Marketing %': st.column_config.TextColumn('Marketing %', help='Ad Spend / Revenue (lower = more efficient)'),
-                        'Ad Share': st.column_config.TextColumn('Ad Share', help='Ad conversions as % of total bookings'),
-                        'Rev/€ Spent': st.column_config.TextColumn('Rev/€ Spent', help='Revenue per marketing euro (correlation, not ROI)'),
-                        'Blended CAC': st.column_config.TextColumn('Blended CAC', help='Ad Spend / Total Bookings (cost to acquire any customer)'),
-                    }
-
-                    # Style TOTAL row
-                    def highlight_total_eff(row):
-                        if row['Location'] == 'TOTAL':
-                            return ['font-weight: bold; background-color: #f3f4f6'] * len(row)
-                        return [''] * len(row)
-
-                    styled_eff = eff_display.style.apply(highlight_total_eff, axis=1)
-                    st.dataframe(styled_eff, use_container_width=True, hide_index=True, column_config=efficiency_column_config)
-
-                    # Scatter: Marketing Spend vs Revenue
-                    st.markdown("#### Marketing Investment vs Revenue")
-                    scatter_eff = eff_df[eff_df['Revenue'] > 0].copy()
-
-                    if len(scatter_eff) > 1:
-                        fig_eff = px.scatter(
-                            scatter_eff,
-                            x='Ad Spend',
-                            y='Revenue',
-                            color='Marketing %',
-                            color_continuous_scale=['#22c55e', '#facc15', '#ef4444'],
-                            hover_name='Location',
-                            text='Location',
-                            labels={
-                                'Ad Spend': 'Marketing Spend (€)',
-                                'Revenue': 'Revenue (€)',
-                                'Marketing %': 'Marketing %'
-                            }
-                        )
-                        fig_eff.update_traces(textposition='top center')
-                        fig_eff.update_layout(
-                            height=400,
-                            coloraxis_colorbar_title='Marketing %'
-                        )
-                        st.plotly_chart(fig_eff, use_container_width=True)
-                        st.caption("Points further from origin with low Marketing % = efficient locations")
-                else:
-                    st.info("Upload booking data to see revenue metrics. Revenue data comes from 'Total gross' column in booking files.")
-
-            # ===== TAB 3: CAPACITY =====
-            with tab3:
-                st.markdown("#### Capacity & Marketing Alignment")
-
-                # Build capacity data
-                capacity_data = []
-
-                # Use the selected date range from the date picker (same as marketing filter)
-                num_weeks = 4  # Default
-                cap_date_range_str = ""
-                if 'date_range' in dir() and len(date_range) == 2:
-                    # Use selected date range from filter
-                    cap_start_date = pd.Timestamp(date_range[0])
-                    cap_end_date = pd.Timestamp(date_range[1])
-                    date_range_days = (cap_end_date - cap_start_date).days + 1
-                    num_weeks = max(1, date_range_days // 7)  # At least 1 week
-                    cap_date_range_str = f"{cap_start_date.strftime('%b %d')} - {cap_end_date.strftime('%b %d, %Y')}"
-                elif pd.notna(data_min_date) and pd.notna(data_max_date):
-                    # Fallback to full data range
-                    date_range_days = (data_max_date - data_min_date).days + 1
-                    num_weeks = max(1, date_range_days // 7)
-                    cap_date_range_str = f"{data_min_date.strftime('%b %d')} - {data_max_date.strftime('%b %d, %Y')}"
-
-                # Show period info
-                if cap_date_range_str:
-                    st.caption(f"**Period:** {cap_date_range_str} ({num_weeks} weeks) · Capacity = weekly capacity × {num_weeks} weeks")
-                else:
-                    st.caption(f"Compare marketing investment with location capacity utilization ({num_weeks} weeks)")
-
-                # Initialize custom capacity in session state
-                if 'custom_capacity' not in st.session_state:
-                    st.session_state.custom_capacity = {}
-
-                # Editable capacity settings
-                with st.expander("Edit Weekly Capacity per Location", expanded=False):
-                    st.caption("Set weekly capacity (weekday + weekend) for each location. Changes apply immediately.")
-
-                    # Get all locations from LOCATION_NAME_MAP
-                    all_locations = list(LOCATION_NAME_MAP.keys())
-
-                    # Create columns for compact layout
-                    col1, col2 = st.columns(2)
-                    for i, loc in enumerate(all_locations):
-                        # Get default capacity from LOCATION_CAPACITY
-                        default_cap = 0
-                        for booking_loc in LOCATION_NAME_MAP.get(loc, []):
-                            if booking_loc in LOCATION_CAPACITY:
-                                cap_data = LOCATION_CAPACITY[booking_loc]
-                                default_cap += cap_data.get('weekday', 0) + cap_data.get('weekend', 0)
-
-                        # Use custom capacity if set, otherwise use default
-                        current_cap = st.session_state.custom_capacity.get(loc, default_cap)
-
-                        with col1 if i % 2 == 0 else col2:
-                            new_cap = st.number_input(
-                                loc,
-                                min_value=0,
-                                max_value=5000,
-                                value=current_cap,
-                                step=10,
-                                key=f"cap_{loc}"
-                            )
-                            if new_cap != current_cap:
-                                st.session_state.custom_capacity[loc] = new_cap
-
-                # Get custom capacity from session state
-                custom_cap = st.session_state.get('custom_capacity', {})
-
-                for loc in loc_summary['Location'].tolist():
-                    cap_info = get_capacity_per_location(loc, num_weeks, custom_cap)
-                    bookings = revenue_data.get(loc, {}).get('bookings', 0) if revenue_data else 0
-                    ad_spend = loc_summary[loc_summary['Location'] == loc]['Spend'].values[0]
-
-                    if cap_info and cap_info['period_total'] > 0:
-                        occupancy = (bookings / cap_info['period_total'] * 100) if cap_info['period_total'] > 0 else 0
-                        available = cap_info['period_total'] - bookings
-                        # Cap occupancy at 100% and available at 0
-                        occupancy = min(occupancy, 100)
-                        available = max(available, 0)
-                        capacity_data.append({
-                            'Location': loc,
-                            'Capacity': cap_info['period_total'],
-                            'Bookings': bookings,
-                            'Occupancy': occupancy,
-                            'Ad Spend': ad_spend,
-                            'Available': available,
-                            'Cost/Slot': ad_spend / bookings if bookings > 0 else 0
-                        })
-
-                if capacity_data:
-                    cap_df = pd.DataFrame(capacity_data)
-                    cap_df = cap_df.sort_values('Occupancy', ascending=False)
-
-                    # Identify opportunities
-                    # Use absolute thresholds for meaningful status labels
-                    # 65% occupancy is a reasonable target for "good" performance
-                    occupancy_threshold = 65
-                    # Calculate median spend from locations with actual bookings
-                    locations_with_bookings = cap_df[cap_df['Bookings'] > 0]
-                    spend_threshold = locations_with_bookings['Ad Spend'].median() if len(locations_with_bookings) > 0 else 0
-
-                    def get_opportunity_label(row):
-                        if row['Bookings'] == 0:
-                            return 'No Data'  # No booking data for this location
-                        elif row['Occupancy'] < occupancy_threshold and row['Ad Spend'] < spend_threshold:
-                            return 'Opportunity'  # Low occupancy, low spend - room to grow
-                        elif row['Occupancy'] >= occupancy_threshold and row['Ad Spend'] < spend_threshold:
-                            return 'Efficient'  # High occupancy, low spend
-                        elif row['Occupancy'] < occupancy_threshold and row['Ad Spend'] >= spend_threshold:
-                            return 'Review'  # Low occupancy, high spend
-                        else:
-                            return 'Performing'  # High occupancy, high spend
-
-                    cap_df['Status'] = cap_df.apply(get_opportunity_label, axis=1)
-
-                    # Calculate totals
-                    total_capacity = cap_df['Capacity'].sum()
-                    total_bookings_cap = cap_df['Bookings'].sum()
-                    total_available = cap_df['Available'].sum()
-                    total_occupancy = (total_bookings_cap / total_capacity * 100) if total_capacity > 0 else 0
-                    total_spend_cap = cap_df['Ad Spend'].sum()
-
-                    # Format for display
-                    cap_display = cap_df.copy()
-                    cap_display['Capacity'] = cap_display['Capacity'].apply(lambda x: f"{x:,.0f}")
-                    cap_display['Bookings'] = cap_display['Bookings'].apply(lambda x: f"{x:,.0f}")
-                    cap_display['Occupancy'] = cap_display['Occupancy'].apply(lambda x: f"{x:.0f}%")
-                    cap_display['Ad Spend'] = cap_display['Ad Spend'].apply(lambda x: f"€{x:,.0f}")
-                    cap_display['Available'] = cap_display['Available'].apply(lambda x: f"{x:,.0f}")
-                    cap_display['Cost/Slot'] = cap_display['Cost/Slot'].apply(lambda x: f"€{x:.1f}")
-
-                    # Select columns
-                    cap_display = cap_display[['Location', 'Capacity', 'Bookings', 'Occupancy', 'Ad Spend', 'Available', 'Cost/Slot', 'Status']]
-
-                    total_row_cap = pd.DataFrame({
-                        'Location': ['TOTAL'],
-                        'Capacity': [f"{total_capacity:,.0f}"],
-                        'Bookings': [f"{total_bookings_cap:,.0f}"],
-                        'Occupancy': [f"{total_occupancy:.0f}%"],
-                        'Ad Spend': [f"€{total_spend_cap:,.0f}"],
-                        'Available': [f"{total_available:,.0f}"],
-                        'Cost/Slot': ['-'],
-                        'Status': ['-']
-                    })
-                    cap_display = pd.concat([cap_display, total_row_cap], ignore_index=True)
-
-                    # Column config with help tooltips
-                    capacity_column_config = {
-                        'Location': st.column_config.TextColumn('Location'),
-                        'Capacity': st.column_config.TextColumn('Capacity', help=f'Total available slots (weekly capacity × {num_weeks} weeks)'),
-                        'Bookings': st.column_config.TextColumn('Bookings', help='Actual bookings from booking system'),
-                        'Occupancy': st.column_config.TextColumn('Occupancy', help='Bookings / Capacity (capped at 100%)'),
-                        'Ad Spend': st.column_config.TextColumn('Ad Spend', help='Marketing spend per location'),
-                        'Available': st.column_config.TextColumn('Available', help='Remaining slots (Capacity - Bookings, min 0)'),
-                        'Cost/Slot': st.column_config.TextColumn('Cost/Slot', help='Ad Spend / Bookings filled'),
-                        'Status': st.column_config.TextColumn('Status', help='Based on 65% occupancy threshold. Efficient = ≥65% occ + below median spend | Performing = ≥65% occ + above median spend | Opportunity = <65% occ + below median spend | Review = <65% occ + above median spend'),
-                    }
-
-                    # Style TOTAL row
-                    def highlight_total_cap(row):
-                        if row['Location'] == 'TOTAL':
-                            return ['font-weight: bold; background-color: #f3f4f6'] * len(row)
-                        return [''] * len(row)
-
-                    styled_cap = cap_display.style.apply(highlight_total_cap, axis=1)
-                    st.dataframe(styled_cap, use_container_width=True, hide_index=True, column_config=capacity_column_config)
-
-                    # Scatter: Occupancy vs Marketing Spend
-                    st.markdown("#### Marketing Spend vs Occupancy")
-
-                    # Use cap_df which already has Status column (need numeric values for chart)
-                    cap_chart = cap_df[['Location', 'Capacity', 'Bookings', 'Occupancy', 'Ad Spend', 'Available', 'Cost/Slot', 'Status']].copy()
-
-                    fig_cap = px.scatter(
-                        cap_chart,
-                        x='Ad Spend',
-                        y='Occupancy',
-                        size='Capacity',
-                        color='Status',
-                        hover_name='Location',
-                        text='Location',
-                        color_discrete_map={
-                            'Opportunity': '#3b82f6',
-                            'Efficient': '#22c55e',
-                            'Review': '#ef4444',
-                            'Performing': '#a855f7',
-                            'No Data': '#9ca3af'
-                        }
-                    )
-
-                    # Add quadrant lines using the thresholds
-                    fig_cap.add_hline(y=occupancy_threshold, line_dash="dash", line_color="#999",
-                                      annotation_text=f"Target: {occupancy_threshold}%")
-                    fig_cap.add_vline(x=spend_threshold, line_dash="dash", line_color="#999",
-                                      annotation_text=f"Median Spend: €{spend_threshold:,.0f}")
-
-                    fig_cap.update_traces(textposition='top center')
-                    fig_cap.update_layout(
-                        height=450,
-                        xaxis_title='Marketing Spend (€)',
-                        yaxis_title='Occupancy (%)',
-                        yaxis=dict(range=[0, 100])
-                    )
-                    st.plotly_chart(fig_cap, use_container_width=True)
-                    st.caption("Bubble size = Total Capacity | Quadrants show investment opportunities")
-                else:
-                    st.info("No capacity data available for the matched locations. Check that location names in booking data match the capacity configuration.")
-        else:
-            st.info("No location-specific campaigns found. Campaigns need location names (e.g., 'Nijmegen', 'Rotterdam') to appear here.")
 
     # Reset button
     st.sidebar.markdown("---")

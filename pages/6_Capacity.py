@@ -55,6 +55,49 @@ CLUSTER_TARGETS = {
     'Onderbenut': {'total': (50, 55), 'weekend': (70, 75), 'piek': (60, 65), 'dal': (25, 30)},
 }
 
+
+def find_capacity_match(location_name):
+    """Find matching LOCATION_CAPACITY entry for a given location name.
+    Returns the matching key from LOCATION_CAPACITY or None if no match found.
+    Supports flexible matching (case-insensitive, partial matching)."""
+    if not location_name:
+        return None
+
+    # Exact match first
+    if location_name in LOCATION_CAPACITY:
+        return location_name
+
+    # Case-insensitive exact match
+    location_lower = location_name.lower()
+    for cap_key in LOCATION_CAPACITY.keys():
+        if cap_key.lower() == location_lower:
+            return cap_key
+
+    # Partial match - check if location name is contained in capacity key or vice versa
+    for cap_key in LOCATION_CAPACITY.keys():
+        cap_key_lower = cap_key.lower()
+        # Remove "Kuuma " prefix for matching
+        cap_key_stripped = cap_key_lower.replace('kuuma ', '')
+
+        if location_lower in cap_key_lower or cap_key_stripped in location_lower:
+            return cap_key
+
+        # Also try matching without "Kuuma" prefix in the location name
+        location_stripped = location_lower.replace('kuuma ', '')
+        if location_stripped in cap_key_stripped or cap_key_stripped in location_stripped:
+            return cap_key
+
+    return None
+
+
+def get_capacity_for_location(location_name):
+    """Get capacity data for a location, with flexible matching."""
+    cap_key = find_capacity_match(location_name)
+    if cap_key:
+        return LOCATION_CAPACITY[cap_key]
+    return None
+
+
 # Header with logo
 col1, col2 = st.columns([1, 5])
 with col1:
@@ -297,19 +340,9 @@ else:
         # Remove invalid dates
         capacity_data = capacity_data[capacity_data['visit_datetime'].notna()]
 
-        # Filter to known locations only
-        known_locations = list(LOCATION_CAPACITY.keys())
-        capacity_data = capacity_data[capacity_data['location'].isin(known_locations)]
-
+        # Show all locations from the data file (no filtering against predefined list)
         if len(capacity_data) == 0:
-            st.warning(f"""
-            **No matching locations found.**
-
-            The capacity analysis requires locations that match the configured sauna locations:
-            {', '.join(known_locations)}
-
-            Your data contains: {', '.join(df2[location_col].unique()[:5])}...
-            """)
+            st.warning("**No valid data found.** Please check your data file has valid dates.")
         else:
             # Classify time periods
             capacity_data['time_period'] = capacity_data['visit_datetime'].apply(classify_time_period)
@@ -389,10 +422,10 @@ else:
                 # Create summary table
                 summary_data = []
                 for location in selected_locations:
-                    if location not in LOCATION_CAPACITY:
+                    cap = get_capacity_for_location(location)
+                    if cap is None:
                         continue
 
-                    cap = LOCATION_CAPACITY[location]
                     cluster = cap['cluster']
 
                     # Get bookings for each period
@@ -624,10 +657,10 @@ Use this heatmap to optimize your team schedule - ensure adequate coverage durin
                         # Rebuild summary_df for selected week
                         summary_data = []
                         for location in selected_locations:
-                            if location not in LOCATION_CAPACITY:
+                            cap = get_capacity_for_location(location)
+                            if cap is None:
                                 continue
 
-                            cap = LOCATION_CAPACITY[location]
                             cluster = cap['cluster']
 
                             dal_bookings = period_stats[(period_stats['location'] == location) & (period_stats['time_period'] == 'dal')]['bookings'].sum()
@@ -797,9 +830,9 @@ Use this heatmap to optimize your team schedule - ensure adequate coverage durin
                     trend_data = []
                     for _, row in weekly_pivot.iterrows():
                         location = row['location']
-                        if location not in LOCATION_CAPACITY:
+                        cap = get_capacity_for_location(location)
+                        if cap is None:
                             continue
-                        cap = LOCATION_CAPACITY[location]
 
                         dal_occ = (row.get('dal', 0) / cap['dal'] * 100) if cap['dal'] > 0 else 0
                         piek_occ = (row.get('piek', 0) / cap['piek'] * 100) if cap['piek'] > 0 else 0
