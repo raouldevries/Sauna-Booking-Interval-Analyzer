@@ -256,6 +256,249 @@ def get_capacity_per_location(marketing_loc, num_weeks=4, custom_capacity=None):
     }
 
 
+def calculate_lead_time_by_location(df1, df2, location_col='Tour', date_col='Created'):
+    """Calculate average lead time (booking to visit) per location.
+
+    Returns dict of {location: {'avg_lead_time': X, 'median_lead_time': Y, 'bookings': Z}}
+    """
+    if df1 is None or df2 is None:
+        return {}
+
+    # Find common ID column
+    id_col = None
+    for col in ['Booking ID', 'booking_id', 'ID', 'id']:
+        if col in df1.columns and col in df2.columns:
+            id_col = col
+            break
+
+    if id_col is None:
+        return {}
+
+    # Merge df1 (booking dates) with df2 (visit dates)
+    df1_prep = df1[[id_col, date_col, location_col]].copy()
+    df1_prep.columns = ['booking_id', 'booking_date', 'location']
+
+    # Find visit date column in df2
+    visit_col = None
+    for col in ['Activity start', 'Start', 'Visit date', 'Date']:
+        if col in df2.columns:
+            visit_col = col
+            break
+    if visit_col is None:
+        return {}
+
+    df2_prep = df2[[id_col, visit_col]].copy()
+    df2_prep.columns = ['booking_id', 'visit_date']
+
+    merged = df1_prep.merge(df2_prep, on='booking_id', how='inner')
+    merged['booking_date'] = pd.to_datetime(merged['booking_date'], errors='coerce')
+    merged['visit_date'] = pd.to_datetime(merged['visit_date'], errors='coerce')
+    merged['interval_days'] = (merged['visit_date'] - merged['booking_date']).dt.days
+
+    # Filter valid records
+    merged = merged[(merged['interval_days'] >= 0) & (merged['interval_days'].notna())]
+
+    if len(merged) == 0:
+        return {}
+
+    # Group by location
+    result = {}
+    for loc in merged['location'].unique():
+        loc_data = merged[merged['location'] == loc]
+        result[loc] = {
+            'avg_lead_time': loc_data['interval_days'].mean(),
+            'median_lead_time': loc_data['interval_days'].median(),
+            'bookings': len(loc_data)
+        }
+
+    return result
+
+
+def time_correlated_attribution(campaigns_df, bookings_df, location_col='Tour', date_col='Created',
+                                 revenue_col='Total gross', conversion_window_days=14):
+    """
+    Correlate marketing campaigns with booking data using time-based attribution.
+
+    For each campaign with date range:
+    1. Find locations it targets (from campaign name)
+    2. Count bookings made during campaign period + conversion window
+    3. Calculate attributed revenue
+
+    Returns DataFrame with campaign attribution metrics.
+    """
+    if campaigns_df is None or bookings_df is None:
+        return None
+
+    # Check required columns
+    if 'report_start' not in campaigns_df.columns or 'report_end' not in campaigns_df.columns:
+        return None
+
+    # Prepare bookings data
+    bookings = bookings_df.copy()
+    bookings['booking_date'] = pd.to_datetime(bookings[date_col], errors='coerce')
+    bookings['location'] = bookings[location_col].astype(str).str.lower()
+    bookings['revenue'] = pd.to_numeric(bookings[revenue_col], errors='coerce').fillna(0)
+    bookings = bookings[bookings['booking_date'].notna()]
+
+    results = []
+
+    for _, campaign in campaigns_df.iterrows():
+        if pd.isna(campaign.get('report_start')) or pd.isna(campaign.get('report_end')):
+            continue
+
+        campaign_name = campaign.get('campaign_name', '')
+        campaign_start = pd.to_datetime(campaign['report_start'])
+        campaign_end = pd.to_datetime(campaign['report_end'])
+
+        # Extended window for conversions
+        attribution_end = campaign_end + pd.Timedelta(days=conversion_window_days)
+
+        # Find target locations
+        target_locations = campaign_matches_all_locations(campaign_name)
+        is_all_locations = 'alle locaties' in str(campaign_name).lower() or 'all locations' in str(campaign_name).lower()
+
+        # Filter bookings by date range
+        date_mask = (bookings['booking_date'] >= campaign_start) & (bookings['booking_date'] <= attribution_end)
+        period_bookings = bookings[date_mask]
+
+        if is_all_locations:
+            # Attribute to all locations proportionally
+            attributed_bookings = len(period_bookings)
+            attributed_revenue = period_bookings['revenue'].sum()
+            target_locations_str = 'All Locations'
+        elif target_locations:
+            # Filter by target locations
+            location_mask = period_bookings['location'].apply(
+                lambda x: any(loc.lower() in x for loc in target_locations)
+            )
+            location_bookings = period_bookings[location_mask]
+            attributed_bookings = len(location_bookings)
+            attributed_revenue = location_bookings['revenue'].sum()
+            target_locations_str = ', '.join(target_locations)
+        else:
+            # No location match - general/brand campaign
+            attributed_bookings = 0
+            attributed_revenue = 0
+            target_locations_str = 'Unknown'
+
+        results.append({
+            'campaign_name': campaign_name,
+            'Platform': campaign.get('Platform', ''),
+            'spend': campaign.get('spend', 0),
+            'campaign_start': campaign_start,
+            'campaign_end': campaign_end,
+            'target_locations': target_locations_str,
+            'attributed_bookings': attributed_bookings,
+            'attributed_revenue': attributed_revenue,
+            'stdc_phase': campaign.get('stdc_phase', 'Untagged')
+        })
+
+    if not results:
+        return None
+
+    result_df = pd.DataFrame(results)
+
+    # Calculate efficiency metrics
+    result_df['roi'] = ((result_df['attributed_revenue'] - result_df['spend']) /
+                        result_df['spend'].replace(0, float('nan')) * 100).fillna(0)
+    result_df['cost_per_booking'] = (result_df['spend'] /
+                                      result_df['attributed_bookings'].replace(0, float('nan'))).fillna(0)
+
+    return result_df
+
+
+def location_marketing_summary(attribution_df, bookings_df, location_col='Tour',
+                                date_col='Created', revenue_col='Total gross'):
+    """
+    Aggregate marketing attribution by location.
+
+    Returns DataFrame with per-location marketing metrics.
+    """
+    if attribution_df is None or len(attribution_df) == 0:
+        return None
+
+    # Get overall period from campaigns
+    min_date = attribution_df['campaign_start'].min()
+    max_date = attribution_df['campaign_end'].max()
+
+    # Calculate total revenue per location for the period
+    bookings = bookings_df.copy()
+    bookings['booking_date'] = pd.to_datetime(bookings[date_col], errors='coerce')
+    bookings['revenue'] = pd.to_numeric(bookings[revenue_col], errors='coerce').fillna(0)
+
+    # Filter by campaign date range - but extend to include conversion window
+    conversion_window = pd.Timedelta(days=14)
+    bookings_in_period = bookings[
+        (bookings['booking_date'] >= min_date) &
+        (bookings['booking_date'] <= max_date + conversion_window)
+    ]
+
+    # If very few bookings in period, use full booking data with a warning
+    if len(bookings_in_period) < 100:
+        # Fall back to full data
+        bookings_in_period = bookings[bookings['booking_date'].notna()]
+
+    bookings_in_period = bookings_in_period.copy()
+    bookings_in_period['_loc_lower'] = bookings_in_period[location_col].astype(str).str.lower()
+
+    # Aggregate attribution by location
+    location_results = []
+
+    for marketing_loc, booking_locs in LOCATION_NAME_MAP.items():
+        # Get campaigns targeting this location
+        loc_campaigns = attribution_df[
+            attribution_df['target_locations'].str.contains(marketing_loc, case=False, na=False) |
+            (attribution_df['target_locations'] == 'All Locations')
+        ]
+
+        if len(loc_campaigns) == 0:
+            continue
+
+        # Only include spend from campaigns specifically targeting this location
+        # Exclude "All Locations" campaigns as they can't be reliably attributed
+        specific_campaigns = loc_campaigns[loc_campaigns['target_locations'] != 'All Locations']
+
+        total_spend = specific_campaigns['spend'].sum()
+
+        # Get booking location totals - use flexible matching
+        # Match if booking location contains any of the key words from the marketing location
+        loc_keywords = marketing_loc.lower().replace('amsterdam ', '').split()
+
+        # Also include the full booking location names for exact matching
+        booking_loc_lower = [loc.lower() for loc in booking_locs]
+
+        # Create mask: exact match OR contains key location word
+        mask = bookings_in_period['_loc_lower'].isin(booking_loc_lower)
+
+        # Add partial matching for key terms
+        for keyword in loc_keywords:
+            if len(keyword) > 3:  # Only match meaningful keywords
+                mask = mask | bookings_in_period['_loc_lower'].str.contains(keyword, case=False, na=False)
+
+        loc_bookings = bookings_in_period[mask]
+
+        location_results.append({
+            'location': marketing_loc,
+            'marketing_spend': total_spend,
+            'total_bookings': len(loc_bookings),
+            'total_revenue': loc_bookings['revenue'].sum(),
+            'campaigns_count': len(loc_campaigns)
+        })
+
+    if not location_results:
+        return None
+
+    result_df = pd.DataFrame(location_results)
+
+    # Calculate metrics
+    result_df['revenue_per_spend'] = (result_df['total_revenue'] /
+                                       result_df['marketing_spend'].replace(0, float('nan'))).fillna(0)
+    result_df['cost_per_booking'] = (result_df['marketing_spend'] /
+                                      result_df['total_bookings'].replace(0, float('nan'))).fillna(0)
+
+    return result_df.sort_values('marketing_spend', ascending=False)
+
+
 @st.cache_data(show_spinner=False)
 def calculate_marketing_metrics(_df_hash, df_json):
     """Calculate all marketing metrics with caching. Uses df_hash for cache key."""
@@ -1276,7 +1519,7 @@ else:
                 return 'background-color: #fce7f3; color: #9d174d'
             return 'background-color: #f3f4f6; color: #4b5563'
 
-        styled_df = display_df.style.applymap(style_stdc, subset=['STDC'])
+        styled_df = display_df.style.map(style_stdc, subset=['STDC'])
 
         campaign_config = {
             'Campaign': st.column_config.TextColumn('Campaign', help='Campaign name from ad platform'),
@@ -1322,7 +1565,6 @@ else:
                 for campaign in campaigns:
                     st.session_state.stdc_tags[campaign] = suggest_stdc_phase(campaign)
                 st.rerun()
-
 
     # Reset button
     st.sidebar.markdown("---")

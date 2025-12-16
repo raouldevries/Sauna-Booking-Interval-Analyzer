@@ -129,9 +129,32 @@ LOCATION_CAPACITY = {
 2. Google Drive (configured via Streamlit secrets) - for production
 3. Manual file upload via sidebar
 
+### 9. Marketing ROI by Location - Time-Correlated Attribution
+- Added new section to Marketing page: "Marketing ROI by Location"
+- Implements **Time-Correlated Attribution** (Option B from discussion):
+  - For each campaign with date range (Meta Ads), identifies target locations from campaign name
+  - Counts bookings created during campaign period + 14-day conversion window
+  - Calculates attributed revenue from those bookings
+- **New functions added:**
+  - `calculate_lead_time_by_location(df1, df2)` - Average lead time per location
+  - `time_correlated_attribution(campaigns_df, bookings_df)` - Match campaigns to bookings by date
+  - `location_marketing_summary(attribution_df, bookings_df)` - Aggregate by location
+- **Displays:**
+  - Key metrics: Marketing Spend, Attributed Revenue, ROI, Avg Cost/Booking
+  - Location breakdown table with ROI % color-coded (green ≥100%, yellow 0-99%, red <0%)
+  - Lead Time Insights expander showing avg/median lead time per location
+  - Explanation of attribution methodology
+- **Lead Time Relevance:** Used to understand customer booking behavior per location
+  - Shorter lead times (3-5 days) = faster campaign response
+  - Longer lead times (7+ days) = benefit from sustained campaign exposure
+- **Limitations noted in UI:**
+  - Google Ads exports don't include date ranges (only Meta Ads)
+  - Correlation ≠ causation
+  - "All Locations" campaigns have spend split equally
+
 ## Known Issues / Notes
 - Some locations may not have capacity data configured (Bloemendaal, Den Bosch, Nijmegen NYMA)
-- Marketing location attribution was problematic - campaigns targeting multiple locations couldn't be reliably split
+- Marketing location attribution was problematic for direct location-campaign mapping, now using time-correlated approach
 - Location names in booking data must start with "Kuuma" to appear in Capacity page
 
 ## GitHub Repository

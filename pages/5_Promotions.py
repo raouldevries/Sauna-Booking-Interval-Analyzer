@@ -296,6 +296,18 @@ else:
             if promotion_col != "None":
                 df1_prep['promotion'] = df1[promotion_col].values
 
+            # Add Coupons column if available
+            if 'Coupons' in df1.columns:
+                df1_prep['coupons'] = df1['Coupons'].values
+            if 'Number of coupons' in df1.columns:
+                df1_prep['num_coupons'] = pd.to_numeric(df1['Number of coupons'], errors='coerce').fillna(0)
+
+            # Add Prepaid package column if available
+            if 'Prepaid package' in df1.columns:
+                df1_prep['prepaid_package'] = df1['Prepaid package'].values
+            if 'Prepaid credits' in df1.columns:
+                df1_prep['prepaid_credits'] = pd.to_numeric(df1['Prepaid credits'], errors='coerce').fillna(0)
+
             # Merge on booking ID
             merged = df1_prep.merge(df2_prep, on='booking_id', how='inner')
 
@@ -354,38 +366,63 @@ else:
             # Key metrics
             st.markdown("### Overview")
 
-            col1, col2, col3, col4 = st.columns(4)
+            # Calculate coupon and prepaid stats for overview
+            with_coupons_count = 0
+            with_prepaid_count = 0
+            if 'coupons' in promo_data.columns:
+                with_coupons_count = len(promo_data[promo_data['coupons'].notna() & (promo_data['coupons'] != '')])
+            if 'prepaid_package' in promo_data.columns:
+                with_prepaid_count = len(promo_data[promo_data['prepaid_package'].notna() & (promo_data['prepaid_package'] != '')])
+
+            col1, col2, col3, col4, col5, col6 = st.columns(6)
             with col1:
                 promo_pct = len(with_promo) / len(promo_data) * 100
                 st.metric(
-                    "Bookings with Promotion",
+                    "Promotions",
                     f"{len(with_promo):,}",
                     delta=f"{promo_pct:.1f}% of total",
+                    delta_color="off",
                     help="Number of bookings that used a promotion code."
                 )
             with col2:
-                avg_with = with_promo['revenue'].mean() if len(with_promo) > 0 else 0
-                avg_without = without_promo['revenue'].mean() if len(without_promo) > 0 else 0
-                diff = avg_with - avg_without
+                coupon_pct = with_coupons_count / len(promo_data) * 100 if len(promo_data) > 0 else 0
                 st.metric(
-                    "Avg Booking (with promo)",
-                    f"€{avg_with:.2f}",
-                    delta=f"€{diff:.2f} vs no promo",
-                    help="Average revenue for bookings that used a promotion."
+                    "Coupons",
+                    f"{with_coupons_count:,}",
+                    delta=f"{coupon_pct:.1f}% of total",
+                    delta_color="off",
+                    help="Number of bookings that used a coupon code."
                 )
             with col3:
+                prepaid_pct = with_prepaid_count / len(promo_data) * 100 if len(promo_data) > 0 else 0
                 st.metric(
-                    "Avg Booking (no promo)",
+                    "Prepaid Packages",
+                    f"{with_prepaid_count:,}",
+                    delta=f"{prepaid_pct:.1f}% of total",
+                    delta_color="off",
+                    help="Number of bookings using a prepaid package."
+                )
+            with col4:
+                avg_with = with_promo['revenue'].mean() if len(with_promo) > 0 else 0
+                avg_without = without_promo['revenue'].mean() if len(without_promo) > 0 else 0
+                diff = avg_with - avg_without  # Used in insights section below
+                st.metric(
+                    "Avg (with promo)",
+                    f"€{avg_with:.2f}",
+                    help="Average revenue for bookings that used a promotion."
+                )
+            with col5:
+                st.metric(
+                    "Avg (no promo)",
                     f"€{avg_without:.2f}",
                     help="Average revenue for bookings without a promotion."
                 )
-            with col4:
+            with col6:
                 promo_revenue = with_promo['revenue'].sum()
-                promo_rev_pct = promo_revenue / total_revenue * 100 if total_revenue > 0 else 0
+                promo_rev_pct = promo_revenue / total_revenue * 100 if total_revenue > 0 else 0  # Used in insights section
                 st.metric(
-                    "Revenue from Promotions",
+                    "Promo Revenue",
                     f"€{promo_revenue:,.0f}",
-                    delta=f"{promo_rev_pct:.1f}% of total",
                     help="Total revenue generated from bookings with promotions."
                 )
 
@@ -574,6 +611,125 @@ else:
 
             else:
                 st.info("No bookings with promotions found in the selected data.")
+
+            # ===== COUPONS SECTION =====
+            if 'coupons' in promo_data.columns:
+                st.markdown("---")
+                st.markdown("### Coupon Usage")
+
+                # Filter bookings with coupons
+                with_coupons = promo_data[promo_data['coupons'].notna() & (promo_data['coupons'] != '')]
+
+                if len(with_coupons) > 0:
+                    # Key metrics
+                    coupon_pct = len(with_coupons) / len(promo_data) * 100
+                    coupon_revenue = with_coupons['revenue'].sum()
+                    coupon_rev_pct = coupon_revenue / total_revenue * 100 if total_revenue > 0 else 0
+                    avg_coupon_booking = with_coupons['revenue'].mean()
+
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric(
+                            "Bookings with Coupons",
+                            f"{len(with_coupons):,}",
+                            delta=f"{coupon_pct:.1f}% of total",
+                            help="Number of bookings that used a coupon code."
+                        )
+                    with col2:
+                        total_coupons = int(promo_data['num_coupons'].sum()) if 'num_coupons' in promo_data.columns else len(with_coupons)
+                        st.metric(
+                            "Total Coupons Used",
+                            f"{total_coupons:,}",
+                            help="Total number of coupon codes redeemed."
+                        )
+                    with col3:
+                        st.metric(
+                            "Avg Booking (with coupon)",
+                            f"€{avg_coupon_booking:.2f}",
+                            help="Average revenue for bookings with coupons."
+                        )
+                    with col4:
+                        st.metric(
+                            "Revenue from Coupons",
+                            f"€{coupon_revenue:,.0f}",
+                            delta=f"{coupon_rev_pct:.1f}% of total",
+                            help="Total revenue from bookings with coupons."
+                        )
+
+                else:
+                    st.info("No coupon usage found in the selected data.")
+
+            # ===== PREPAID PACKAGES SECTION =====
+            if 'prepaid_package' in promo_data.columns:
+                st.markdown("---")
+                st.markdown("### Prepaid Packages")
+
+                # Filter bookings with prepaid packages
+                with_prepaid = promo_data[promo_data['prepaid_package'].notna() & (promo_data['prepaid_package'] != '')]
+
+                if len(with_prepaid) > 0:
+                    # Key metrics
+                    prepaid_pct = len(with_prepaid) / len(promo_data) * 100
+                    prepaid_revenue = with_prepaid['revenue'].sum()
+                    prepaid_rev_pct = prepaid_revenue / total_revenue * 100 if total_revenue > 0 else 0
+                    avg_prepaid_booking = with_prepaid['revenue'].mean()
+
+                    # Count prepaid credits usage
+                    prepaid_credits_used = 0
+                    if 'prepaid_credits' in promo_data.columns:
+                        prepaid_credits_used = int(promo_data['prepaid_credits'].sum())
+
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric(
+                            "Bookings with Prepaid",
+                            f"{len(with_prepaid):,}",
+                            delta=f"{prepaid_pct:.1f}% of total",
+                            help="Number of bookings using a prepaid package."
+                        )
+                    with col2:
+                        st.metric(
+                            "Prepaid Credits Used",
+                            f"{prepaid_credits_used:,}",
+                            help="Total prepaid credits redeemed."
+                        )
+                    with col3:
+                        st.metric(
+                            "Avg Booking (prepaid)",
+                            f"€{avg_prepaid_booking:.2f}",
+                            help="Average revenue for prepaid bookings."
+                        )
+                    with col4:
+                        st.metric(
+                            "Revenue from Prepaid",
+                            f"€{prepaid_revenue:,.0f}",
+                            delta=f"{prepaid_rev_pct:.1f}% of total",
+                            help="Total revenue from prepaid bookings."
+                        )
+
+                    # Prepaid package breakdown
+                    prepaid_stats = with_prepaid.groupby('prepaid_package').agg({
+                        'booking_id': 'count',
+                        'revenue': ['sum', 'mean']
+                    }).round(2)
+                    prepaid_stats.columns = ['Bookings', 'Total Revenue', 'Avg Booking']
+                    prepaid_stats = prepaid_stats.sort_values('Bookings', ascending=False)
+                    prepaid_stats['% of Prepaid'] = (prepaid_stats['Bookings'] / len(with_prepaid) * 100).round(1)
+
+                    st.markdown("#### Prepaid Package Breakdown")
+                    prepaid_display = prepaid_stats.copy()
+                    prepaid_display['Total Revenue'] = prepaid_display['Total Revenue'].round(0).astype(int)
+
+                    prepaid_config = {
+                        'Bookings': st.column_config.NumberColumn('Bookings', help='Number of bookings using this package'),
+                        '% of Prepaid': st.column_config.NumberColumn('% of Prepaid', help='Share of prepaid bookings'),
+                        'Total Revenue': st.column_config.NumberColumn('Total Revenue', format='€%d'),
+                        'Avg Booking': st.column_config.NumberColumn('Avg Booking', format='€%.2f'),
+                    }
+                    st.dataframe(prepaid_display[['Bookings', '% of Prepaid', 'Total Revenue', 'Avg Booking']],
+                                 use_container_width=True, column_config=prepaid_config)
+                else:
+                    st.info("No prepaid package usage found in the selected data.")
 
     # Reset button
     st.sidebar.markdown("---")
