@@ -165,40 +165,38 @@ def get_revenue_per_location(df1, location_col='Tour', revenue_col='Total gross'
     if df1 is None or location_col not in df1.columns:
         return {}
 
+    # Create lowercase version of location column for case-insensitive matching
+    df1_lower = df1.copy()
+    df1_lower['_location_lower'] = df1_lower[location_col].astype(str).str.lower()
+
     result = {}
     for marketing_loc, booking_locs in LOCATION_NAME_MAP.items():
-        # Special handling for Amsterdam Marine - split into Matsu and Bjørk
-        if split_marine and marketing_loc == 'Amsterdam Marine':
+        # Create lowercase versions of booking location names
+        booking_locs_lower = [loc.lower() for loc in booking_locs]
+
+        # Special handling for Marineterrein - split into Matsu and Bjørk
+        if split_marine and marketing_loc in ['Marineterrein Matsu', 'Marineterrein Bjørk']:
             for booking_loc in booking_locs:
-                mask = df1[location_col] == booking_loc
-                location_bookings = df1[mask]
+                mask = df1_lower['_location_lower'] == booking_loc.lower()
+                location_bookings = df1_lower[mask]
 
                 bookings = len(location_bookings)
                 revenue = 0
-                if revenue_col in df1.columns:
+                if revenue_col in df1_lower.columns:
                     revenue = pd.to_numeric(location_bookings[revenue_col], errors='coerce').fillna(0).sum()
 
-                # Use shorter display names
-                if 'Matsu' in booking_loc:
-                    display_name = 'Marineterrein Matsu'
-                elif 'Bjørk' in booking_loc:
-                    display_name = 'Marineterrein Bjørk'
-                else:
-                    display_name = booking_loc
-
-                result[display_name] = {
+                result[marketing_loc] = {
                     'bookings': bookings,
                     'revenue': revenue,
-                    'parent_marketing_loc': 'Amsterdam Marine'  # Track parent for ad spend split
                 }
         else:
-            # Filter bookings matching any of the booking location names
-            mask = df1[location_col].isin(booking_locs)
-            location_bookings = df1[mask]
+            # Filter bookings matching any of the booking location names (case-insensitive)
+            mask = df1_lower['_location_lower'].isin(booking_locs_lower)
+            location_bookings = df1_lower[mask]
 
             bookings = len(location_bookings)
             revenue = 0
-            if revenue_col in df1.columns:
+            if revenue_col in df1_lower.columns:
                 revenue = pd.to_numeric(location_bookings[revenue_col], errors='coerce').fillna(0).sum()
 
             result[marketing_loc] = {
@@ -209,26 +207,28 @@ def get_revenue_per_location(df1, location_col='Tour', revenue_col='Total gross'
     return result
 
 
-def get_capacity_per_location(marketing_loc, num_weeks=4):
+def get_capacity_per_location(marketing_loc, num_weeks=4, custom_capacity=None):
     """Get weekly capacity for a marketing location."""
     if marketing_loc not in LOCATION_NAME_MAP:
         return None
 
-    booking_locs = LOCATION_NAME_MAP[marketing_loc]
-    total_weekly_capacity = 0
-    total_weekend_capacity = 0
+    # Check for custom capacity first
+    if custom_capacity and marketing_loc in custom_capacity:
+        total_weekly_capacity = custom_capacity[marketing_loc]
+    else:
+        # Calculate from LOCATION_CAPACITY
+        booking_locs = LOCATION_NAME_MAP[marketing_loc]
+        total_weekly_capacity = 0
 
-    for booking_loc in booking_locs:
-        if booking_loc in LOCATION_CAPACITY:
-            cap = LOCATION_CAPACITY[booking_loc]
-            total_weekly_capacity += cap['weekday'] + cap['weekend']
-            total_weekend_capacity += cap['weekend']
+        for booking_loc in booking_locs:
+            if booking_loc in LOCATION_CAPACITY:
+                cap = LOCATION_CAPACITY[booking_loc]
+                total_weekly_capacity += cap['weekday'] + cap['weekend']
 
     # Return capacity for the period (num_weeks)
     return {
         'weekly_total': total_weekly_capacity,
         'period_total': total_weekly_capacity * num_weeks,
-        'weekend_total': total_weekend_capacity * num_weeks
     }
 
 
@@ -1662,8 +1662,47 @@ else:
                 else:
                     st.caption(f"Compare marketing investment with location capacity utilization ({num_weeks} weeks)")
 
+                # Initialize custom capacity in session state
+                if 'custom_capacity' not in st.session_state:
+                    st.session_state.custom_capacity = {}
+
+                # Editable capacity settings
+                with st.expander("Edit Weekly Capacity per Location", expanded=False):
+                    st.caption("Set weekly capacity (weekday + weekend) for each location. Changes apply immediately.")
+
+                    # Get all locations from LOCATION_NAME_MAP
+                    all_locations = list(LOCATION_NAME_MAP.keys())
+
+                    # Create columns for compact layout
+                    col1, col2 = st.columns(2)
+                    for i, loc in enumerate(all_locations):
+                        # Get default capacity from LOCATION_CAPACITY
+                        default_cap = 0
+                        for booking_loc in LOCATION_NAME_MAP.get(loc, []):
+                            if booking_loc in LOCATION_CAPACITY:
+                                cap_data = LOCATION_CAPACITY[booking_loc]
+                                default_cap += cap_data.get('weekday', 0) + cap_data.get('weekend', 0)
+
+                        # Use custom capacity if set, otherwise use default
+                        current_cap = st.session_state.custom_capacity.get(loc, default_cap)
+
+                        with col1 if i % 2 == 0 else col2:
+                            new_cap = st.number_input(
+                                loc,
+                                min_value=0,
+                                max_value=5000,
+                                value=current_cap,
+                                step=10,
+                                key=f"cap_{loc}"
+                            )
+                            if new_cap != current_cap:
+                                st.session_state.custom_capacity[loc] = new_cap
+
+                # Get custom capacity from session state
+                custom_cap = st.session_state.get('custom_capacity', {})
+
                 for loc in loc_summary['Location'].tolist():
-                    cap_info = get_capacity_per_location(loc, num_weeks)
+                    cap_info = get_capacity_per_location(loc, num_weeks, custom_cap)
                     bookings = revenue_data.get(loc, {}).get('bookings', 0) if revenue_data else 0
                     ad_spend = loc_summary[loc_summary['Location'] == loc]['Spend'].values[0]
 
