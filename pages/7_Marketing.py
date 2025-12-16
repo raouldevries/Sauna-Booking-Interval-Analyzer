@@ -31,19 +31,21 @@ st.markdown(hide_default_nav, unsafe_allow_html=True)
 
 # Location keyword mapping for filtering campaigns
 # Maps campaign keywords to display names
+# Note: Generic keywords like 'nijmegen' or 'rotterdam' map to the main/first location
 LOCATION_KEYWORDS = {
-    'Amsterdam Marine': ['marine', 'marineterrein', 'amsterdam m,', 'matsu', 'bjørk', 'bjork'],
+    'Marineterrein Matsu': ['matsu'],
+    'Marineterrein Bjørk': ['bjørk', 'bjork'],
     'Amsterdam Sloterplas': ['sloterplas', 'sloterpas'],
     'Amsterdam Noord': ['amsterdam n', '| amsterdam n'],
     'Amsterdam IJ': ['amsterdam ij', 'aan t ij', 'aan \'t ij', 'centrum'],
-    'Nijmegen': ['nijmegen', 'nyma', 'lent'],
-    'Rotterdam': ['rotterdam', 'delfshaven', 'rijnhaven'],
+    'Nijmegen Lent': ['nijmegen lent', 'lent', 'nijmegen'],  # Generic 'nijmegen' maps here
+    'Nijmegen NYMA': ['nijmegen nyma', 'nyma'],
+    'Rotterdam Rijnhaven': ['rijnhaven', 'rotterdam'],  # Generic 'rotterdam' maps here
+    'Rotterdam Delfshaven': ['delfshaven'],
     'Scheveningen': ['scheveningen'],
     'Den Bosch': ['den bosch', 'denbosch'],
     'Katwijk': ['katwijk'],
-    'Breda': ['breda'],
     'Wijk aan Zee': ['wijk aan zee'],
-    'Bergen aan Zee': ['bergen aan zee'],
     'Bloemendaal': ['bloemendaal'],
 }
 
@@ -57,24 +59,33 @@ LOCATION_CAPACITY = {
     'Kuuma Sloterplas': {'dal': 112, 'piek': 392, 'weekday': 504, 'weekend': 224, 'cluster': 'Groeier'},
     'Kuuma Aan ´t IJ (Centrum)': {'dal': 96, 'piek': 324, 'weekday': 420, 'weekend': 180, 'cluster': 'Groeier'},
     'Kuuma Nijmegen Lent': {'dal': 80, 'piek': 300, 'weekday': 380, 'weekend': 160, 'cluster': 'Groeier'},
+    'Kuuma Nijmegen NYMA': {'dal': 80, 'piek': 300, 'weekday': 380, 'weekend': 160, 'cluster': 'Groeier'},
     'Kuuma Rotterdam Rijnhaven': {'dal': 80, 'piek': 300, 'weekday': 380, 'weekend': 160, 'cluster': 'Groeier'},
+    'Kuuma Rotterdam Delfshaven': {'dal': 80, 'piek': 300, 'weekday': 380, 'weekend': 160, 'cluster': 'Groeier'},
     'Kuuma Scheveningen': {'dal': 120, 'piek': 450, 'weekday': 570, 'weekend': 240, 'cluster': 'Flagship'},
     'Kuuma Den Bosch': {'dal': 80, 'piek': 300, 'weekday': 380, 'weekend': 160, 'cluster': 'Groeier'},
     'Kuuma Katwijk': {'dal': 80, 'piek': 300, 'weekday': 380, 'weekend': 160, 'cluster': 'Groeier'},
+    'Kuuma Wijk aan Zee': {'dal': 80, 'piek': 300, 'weekday': 380, 'weekend': 160, 'cluster': 'Groeier'},
+    'Kuuma Bloemendaal': {'dal': 80, 'piek': 300, 'weekday': 380, 'weekend': 160, 'cluster': 'Groeier'},
 }
 
 # Map marketing location names to booking data location names
 LOCATION_NAME_MAP = {
     # Marketing name -> Booking data location names (list for multiple matches)
-    'Amsterdam Marine': ['Kuuma Marineterrein Matsu', 'Kuuma Marineterrein Bjørk'],
+    'Marineterrein Matsu': ['Kuuma Marineterrein Matsu'],
+    'Marineterrein Bjørk': ['Kuuma Marineterrein Bjørk'],
     'Amsterdam Sloterplas': ['Kuuma Sloterplas'],
     'Amsterdam Noord': ['Kuuma Noord'],
     'Amsterdam IJ': ['Kuuma Aan ´t IJ (Centrum)'],
-    'Nijmegen': ['Kuuma Nijmegen Lent'],
-    'Rotterdam': ['Kuuma Rotterdam Rijnhaven', 'Kuuma Rotterdam Delfshaven'],
+    'Nijmegen Lent': ['Kuuma Nijmegen Lent'],
+    'Nijmegen NYMA': ['Kuuma Nijmegen NYMA'],
+    'Rotterdam Rijnhaven': ['Kuuma Rotterdam Rijnhaven'],
+    'Rotterdam Delfshaven': ['Kuuma Rotterdam Delfshaven'],
     'Scheveningen': ['Kuuma Scheveningen'],
     'Den Bosch': ['Kuuma Den Bosch'],
     'Katwijk': ['Kuuma Katwijk'],
+    'Wijk aan Zee': ['Kuuma Wijk aan Zee'],
+    'Bloemendaal': ['Kuuma Bloemendaal'],
 }
 
 # STDC phase colors (matching the plan)
