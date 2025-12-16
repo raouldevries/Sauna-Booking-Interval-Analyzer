@@ -381,7 +381,11 @@ else:
             st.sidebar.markdown("---")
             st.sidebar.subheader("Filters")
 
-            available_locations = sorted(capacity_data['location'].unique().tolist())
+            # Filter to only show Kuuma locations (exclude test data like "UTM test")
+            all_locations = capacity_data['location'].unique().tolist()
+            kuuma_locations = [loc for loc in all_locations if loc.lower().startswith('kuuma')]
+            capacity_data = capacity_data[capacity_data['location'].isin(kuuma_locations)]
+            available_locations = sorted(kuuma_locations)
             selected_locations = st.sidebar.multiselect(
                 "Locations",
                 options=available_locations,
