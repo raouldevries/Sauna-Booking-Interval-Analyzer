@@ -896,7 +896,7 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
 
             # Data quality summary
             st.info(f"**Data Quality:** {len(processed_data):,} matched records | "
-                   f"{unmatched:,} unmatched | {invalid:,} invalid dates | {negative:,} negative intervals")
+                   f"{unmatched:,} unmatched (likely cancelled bookings) | {invalid:,} invalid dates | {negative:,} negative intervals")
 
             # Distribution chart
             st.markdown("### Booking Lead Time Distribution")
