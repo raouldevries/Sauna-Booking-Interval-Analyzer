@@ -743,73 +743,53 @@ Use this heatmap to optimize your team schedule - ensure adequate coverage durin
                         'Weekend (%)': st.column_config.NumberColumn('Weekend (%)', help='Occupancy during weekend (Fri-Sun)'),
                         'Weekend Target (%)': st.column_config.NumberColumn('Weekend Target (%)', help='Target occupancy for weekend'),
                     }
-                    st.dataframe(styled_df, use_container_width=True, hide_index=True, column_config=capacity_config)
 
+                    st.dataframe(styled_df, use_container_width=True, hide_index=True, column_config=capacity_config)
                     st.caption("Green = At/above target | Yellow = Within 10% | Red = More than 10% below")
 
-                    # Custom target configuration
-                    with st.expander("Configure Custom Targets per Location", expanded=False):
-                        st.markdown("""
-                        Set custom occupancy targets for each location.
-                        Default targets are based on location cluster (Flagship, Groeier, Onderbenut).
-                        """)
+                    # Editable targets table
+                    with st.expander("Edit Target Values", expanded=False):
+                        target_df = display_df[['Location', 'Dal Target (%)', 'Piek Target (%)', 'Weekend Target (%)']].copy()
 
-                        # Create columns for the target input form
-                        for location in summary_df['Location'].unique():
-                            cluster = LOCATION_CAPACITY.get(location, {}).get('cluster', 'Unknown')
-                            default_targets = CLUSTER_TARGETS.get(cluster, {'dal': (0, 0), 'piek': (0, 0), 'weekend': (0, 0)})
+                        target_config = {
+                            'Location': st.column_config.TextColumn('Location'),
+                            'Dal Target (%)': st.column_config.NumberColumn('Dal Target (%)', min_value=0, max_value=100),
+                            'Piek Target (%)': st.column_config.NumberColumn('Piek Target (%)', min_value=0, max_value=100),
+                            'Weekend Target (%)': st.column_config.NumberColumn('Weekend Target (%)', min_value=0, max_value=100),
+                        }
 
-                            st.markdown(f"**{location}** (Default: {cluster})")
+                        edited_targets = st.data_editor(
+                            target_df,
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config=target_config,
+                            disabled=['Location'],
+                            key='target_editor'
+                        )
 
-                            col1, col2, col3 = st.columns(3)
-
-                            # Get existing custom values or use defaults
-                            loc_targets = st.session_state.custom_targets.get(location, {})
-
-                            with col1:
-                                dal_default = loc_targets.get('dal', default_targets['dal'][0])
-                                dal_target = st.number_input(
-                                    "Dal uren (%)",
-                                    min_value=0,
-                                    max_value=100,
-                                    value=int(dal_default),
-                                    key=f"target_dal_{location}",
-                                    help=f"Default: {default_targets['dal'][0]}-{default_targets['dal'][1]}%"
-                                )
-
-                            with col2:
-                                piek_default = loc_targets.get('piek', default_targets['piek'][0])
-                                piek_target = st.number_input(
-                                    "Piek uren (%)",
-                                    min_value=0,
-                                    max_value=100,
-                                    value=int(piek_default),
-                                    key=f"target_piek_{location}",
-                                    help=f"Default: {default_targets['piek'][0]}-{default_targets['piek'][1]}%"
-                                )
-
-                            with col3:
-                                weekend_default = loc_targets.get('weekend', default_targets['weekend'][0])
-                                weekend_target = st.number_input(
-                                    "Weekend (%)",
-                                    min_value=0,
-                                    max_value=100,
-                                    value=int(weekend_default),
-                                    key=f"target_weekend_{location}",
-                                    help=f"Default: {default_targets['weekend'][0]}-{default_targets['weekend'][1]}%"
-                                )
-
-                            # Store custom targets
-                            st.session_state.custom_targets[location] = {
-                                'dal': dal_target,
-                                'piek': piek_target,
-                                'weekend': weekend_target
+                        # Check if any values changed and save to session state
+                        targets_changed = False
+                        for _, row in edited_targets.iterrows():
+                            location = row['Location']
+                            new_targets = {
+                                'dal': int(row['Dal Target (%)']),
+                                'piek': int(row['Piek Target (%)']),
+                                'weekend': int(row['Weekend Target (%)'])
                             }
+                            # Compare with displayed values
+                            old_dal = int(display_df[display_df['Location'] == location]['Dal Target (%)'].values[0])
+                            old_piek = int(display_df[display_df['Location'] == location]['Piek Target (%)'].values[0])
+                            old_weekend = int(display_df[display_df['Location'] == location]['Weekend Target (%)'].values[0])
 
-                            st.markdown("---")
+                            if new_targets['dal'] != old_dal or new_targets['piek'] != old_piek or new_targets['weekend'] != old_weekend:
+                                targets_changed = True
+                                st.session_state.custom_targets[location] = new_targets
 
-                        # Reset to defaults button
-                        if st.button("Reset All to Cluster Defaults", key="reset_targets"):
+                        # Rerun to update the colored table if targets changed
+                        if targets_changed:
+                            st.rerun()
+
+                        if st.button("Reset to Cluster Defaults", key="reset_targets"):
                             st.session_state.custom_targets = {}
                             st.rerun()
 

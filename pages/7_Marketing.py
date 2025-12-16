@@ -287,6 +287,81 @@ def calculate_marketing_metrics(_df_hash, df_json):
 
 
 @st.cache_data(show_spinner=False)
+def calculate_stdc_phase_metrics(_df_hash, df_json):
+    """Calculate STDC phase metrics with caching."""
+    df = pd.read_json(StringIO(df_json))
+
+    # Ensure columns exist
+    if 'impressions' not in df.columns:
+        df['impressions'] = 0
+    if 'reach' not in df.columns:
+        df['reach'] = 0
+    if 'clicks' not in df.columns:
+        df['clicks'] = 0
+    if 'conversions' not in df.columns:
+        df['conversions'] = 0
+
+    # Aggregate by phase
+    phase_agg = df.groupby('stdc_phase').agg({
+        'spend': 'sum',
+        'impressions': 'sum',
+        'reach': 'sum',
+        'clicks': 'sum',
+        'conversions': 'sum'
+    }).to_dict('index')
+
+    # Aggregate by phase + platform
+    platform_agg = df.groupby(['stdc_phase', 'Platform']).agg({
+        'spend': 'sum',
+        'impressions': 'sum',
+        'reach': 'sum',
+        'clicks': 'sum',
+        'conversions': 'sum'
+    })
+
+    results = {}
+    default_metrics = {'spend': 0, 'reach': 0, 'clicks': 0, 'conversions': 0, 'cpm': 0, 'ctr': 0, 'cpa': 0, 'conv_rate': 0,
+                       'google': {'spend': 0, 'reach': 0, 'clicks': 0, 'conversions': 0, 'cpm': 0, 'ctr': 0, 'cpa': 0, 'conv_rate': 0},
+                       'meta': {'spend': 0, 'reach': 0, 'clicks': 0, 'conversions': 0, 'cpm': 0, 'ctr': 0, 'cpa': 0, 'conv_rate': 0}}
+
+    for phase in ['SEE', 'THINK', 'DO', 'CARE', 'Untagged']:
+        if phase in phase_agg:
+            p = phase_agg[phase]
+            total_reach = p['impressions'] + p['reach']
+            spend, clicks, conversions = p['spend'], p['clicks'], p['conversions']
+        else:
+            total_reach = spend = clicks = conversions = 0
+
+        cpm = (spend / total_reach * 1000) if total_reach > 0 else 0
+        ctr = (clicks / total_reach * 100) if total_reach > 0 else 0
+        cpa = (spend / conversions) if conversions > 0 else 0
+        conv_rate = (conversions / clicks * 100) if clicks > 0 else 0
+
+        g_data = platform_agg.loc[(phase, 'Google Ads')] if (phase, 'Google Ads') in platform_agg.index else {'spend': 0, 'impressions': 0, 'reach': 0, 'clicks': 0, 'conversions': 0}
+        m_data = platform_agg.loc[(phase, 'Meta Ads')] if (phase, 'Meta Ads') in platform_agg.index else {'spend': 0, 'impressions': 0, 'reach': 0, 'clicks': 0, 'conversions': 0}
+
+        g_spend, g_impr, g_clicks, g_conv = g_data['spend'], g_data['impressions'], g_data['clicks'], g_data['conversions']
+        m_spend, m_reach, m_clicks, m_conv = m_data['spend'], m_data['reach'], m_data['clicks'], m_data['conversions']
+
+        g_cpm = (g_spend / g_impr * 1000) if g_impr > 0 else 0
+        m_cpm = (m_spend / m_reach * 1000) if m_reach > 0 else 0
+        g_ctr = (g_clicks / g_impr * 100) if g_impr > 0 else 0
+        m_ctr = (m_clicks / m_reach * 100) if m_reach > 0 else 0
+        g_cpa = (g_spend / g_conv) if g_conv > 0 else 0
+        m_cpa = (m_spend / m_conv) if m_conv > 0 else 0
+        g_conv_rate = (g_conv / g_clicks * 100) if g_clicks > 0 else 0
+        m_conv_rate = (m_conv / m_clicks * 100) if m_clicks > 0 else 0
+
+        results[phase] = {
+            'spend': spend, 'reach': total_reach, 'clicks': clicks, 'conversions': conversions,
+            'cpm': cpm, 'ctr': ctr, 'cpa': cpa, 'conv_rate': conv_rate,
+            'google': {'spend': g_spend, 'reach': g_impr, 'clicks': g_clicks, 'conversions': g_conv, 'cpm': g_cpm, 'ctr': g_ctr, 'cpa': g_cpa, 'conv_rate': g_conv_rate},
+            'meta': {'spend': m_spend, 'reach': m_reach, 'clicks': m_clicks, 'conversions': m_conv, 'cpm': m_cpm, 'ctr': m_ctr, 'cpa': m_cpa, 'conv_rate': m_conv_rate}
+        }
+    return results
+
+
+@st.cache_data(show_spinner=False)
 def parse_google_ads_csv(uploaded_file):
     """Parse Google Ads CSV export (has 2-line header)."""
     try:
@@ -680,17 +755,18 @@ else:
 
     # Filter campaigns by location (only if not showing all)
     if not show_all_campaigns and available_locations:
-        filtered_campaigns = []
-        for _, row in combined_df.iterrows():
-            campaign_name = row.get('campaign_name', '')
-            if pd.isna(campaign_name):
-                continue
-            match = campaign_matches_location(campaign_name, available_locations)
-            if match:
-                filtered_campaigns.append(row)
+        # Vectorized location matching
+        def matches_any_location(campaign_name):
+            if pd.isna(campaign_name) or not isinstance(campaign_name, str):
+                return False
+            return campaign_matches_location(campaign_name, available_locations) is not None
 
-        if filtered_campaigns:
-            combined_df = pd.DataFrame(filtered_campaigns)
+        # Apply vectorized filter
+        mask = combined_df['campaign_name'].apply(matches_any_location)
+        filtered_df = combined_df[mask]
+
+        if len(filtered_df) > 0:
+            combined_df = filtered_df
             st.sidebar.info(f"Showing {len(combined_df)} campaigns matching your locations")
         else:
             st.warning("No campaigns match the locations in your booking data.")
@@ -811,62 +887,6 @@ else:
             </style>
             """, unsafe_allow_html=True)
 
-        # Calculate metrics for each STDC phase with platform breakdown
-        def get_phase_metrics(phase_name):
-            phase_data = combined_df[combined_df['stdc_phase'] == phase_name]
-            spend = phase_data['spend'].sum()
-            impressions = phase_data['impressions'].sum() if 'impressions' in phase_data.columns else 0
-            reach = phase_data['reach'].sum() if 'reach' in phase_data.columns else 0
-            total_reach = impressions + reach
-            clicks = phase_data['clicks'].sum() if 'clicks' in phase_data.columns else 0
-            conversions = phase_data['conversions'].sum() if 'conversions' in phase_data.columns else 0
-
-            # Calculate derived metrics
-            cpm = (spend / total_reach * 1000) if total_reach > 0 else 0
-            ctr = (clicks / total_reach * 100) if total_reach > 0 else 0
-            cpa = (spend / conversions) if conversions > 0 else 0
-            conv_rate = (conversions / clicks * 100) if clicks > 0 else 0
-
-            # Platform breakdown
-            google_data = phase_data[phase_data['Platform'] == 'Google Ads']
-            meta_data = phase_data[phase_data['Platform'] == 'Meta Ads']
-
-            g_spend = google_data['spend'].sum()
-            m_spend = meta_data['spend'].sum()
-            g_impr = google_data['impressions'].sum() if 'impressions' in google_data.columns else 0
-            m_reach = meta_data['reach'].sum() if 'reach' in meta_data.columns else 0
-            g_clicks = google_data['clicks'].sum() if 'clicks' in google_data.columns else 0
-            m_clicks = meta_data['clicks'].sum() if 'clicks' in meta_data.columns else 0
-            g_conv = google_data['conversions'].sum() if 'conversions' in google_data.columns else 0
-            m_conv = meta_data['conversions'].sum() if 'conversions' in meta_data.columns else 0
-
-            # Platform-specific derived metrics
-            g_cpm = (g_spend / g_impr * 1000) if g_impr > 0 else 0
-            m_cpm = (m_spend / m_reach * 1000) if m_reach > 0 else 0
-            g_ctr = (g_clicks / g_impr * 100) if g_impr > 0 else 0
-            m_ctr = (m_clicks / m_reach * 100) if m_reach > 0 else 0
-            g_cpa = (g_spend / g_conv) if g_conv > 0 else 0
-            m_cpa = (m_spend / m_conv) if m_conv > 0 else 0
-            g_conv_rate = (g_conv / g_clicks * 100) if g_clicks > 0 else 0
-            m_conv_rate = (m_conv / m_clicks * 100) if m_clicks > 0 else 0
-
-            return {
-                'spend': spend, 'reach': total_reach, 'clicks': clicks,
-                'conversions': conversions, 'cpm': cpm, 'ctr': ctr,
-                'cpa': cpa, 'conv_rate': conv_rate,
-                # Platform breakdowns
-                'google': {
-                    'spend': g_spend, 'reach': g_impr, 'clicks': g_clicks,
-                    'conversions': g_conv, 'cpm': g_cpm, 'ctr': g_ctr,
-                    'cpa': g_cpa, 'conv_rate': g_conv_rate
-                },
-                'meta': {
-                    'spend': m_spend, 'reach': m_reach, 'clicks': m_clicks,
-                    'conversions': m_conv, 'cpm': m_cpm, 'ctr': m_ctr,
-                    'cpa': m_cpa, 'conv_rate': m_conv_rate
-                }
-            }
-
         def format_platform_tooltip(google_val, meta_val, fmt='number'):
             """Format platform split as tooltip text."""
             if fmt == 'currency':
@@ -880,10 +900,17 @@ else:
                 m_str = f"{meta_val:,.0f}" if meta_val > 0 else "-"
             return f"G Ads: {g_str} · M Ads: {m_str}"
 
-        see_metrics = get_phase_metrics('SEE')
-        think_metrics = get_phase_metrics('THINK')
-        do_metrics = get_phase_metrics('DO')
-        care_metrics = get_phase_metrics('CARE')
+        # Calculate all phase metrics using cached function
+        # Create hash for cache key based on relevant columns
+        stdc_cols = ['stdc_phase', 'Platform', 'spend', 'impressions', 'reach', 'clicks', 'conversions']
+        stdc_cols = [c for c in stdc_cols if c in combined_df.columns]
+        df_for_stdc = combined_df[stdc_cols].copy()
+        df_hash = hash(df_for_stdc.to_json())
+        all_phase_metrics = calculate_stdc_phase_metrics(df_hash, df_for_stdc.to_json())
+        see_metrics = all_phase_metrics.get('SEE', {'spend': 0, 'reach': 0, 'clicks': 0, 'conversions': 0, 'cpm': 0, 'ctr': 0, 'cpa': 0, 'conv_rate': 0, 'google': {'spend': 0, 'reach': 0, 'clicks': 0, 'conversions': 0, 'cpm': 0, 'ctr': 0, 'cpa': 0, 'conv_rate': 0}, 'meta': {'spend': 0, 'reach': 0, 'clicks': 0, 'conversions': 0, 'cpm': 0, 'ctr': 0, 'cpa': 0, 'conv_rate': 0}})
+        think_metrics = all_phase_metrics.get('THINK', {'spend': 0, 'reach': 0, 'clicks': 0, 'conversions': 0, 'cpm': 0, 'ctr': 0, 'cpa': 0, 'conv_rate': 0, 'google': {'spend': 0, 'reach': 0, 'clicks': 0, 'conversions': 0, 'cpm': 0, 'ctr': 0, 'cpa': 0, 'conv_rate': 0}, 'meta': {'spend': 0, 'reach': 0, 'clicks': 0, 'conversions': 0, 'cpm': 0, 'ctr': 0, 'cpa': 0, 'conv_rate': 0}})
+        do_metrics = all_phase_metrics.get('DO', {'spend': 0, 'reach': 0, 'clicks': 0, 'conversions': 0, 'cpm': 0, 'ctr': 0, 'cpa': 0, 'conv_rate': 0, 'google': {'spend': 0, 'reach': 0, 'clicks': 0, 'conversions': 0, 'cpm': 0, 'ctr': 0, 'cpa': 0, 'conv_rate': 0}, 'meta': {'spend': 0, 'reach': 0, 'clicks': 0, 'conversions': 0, 'cpm': 0, 'ctr': 0, 'cpa': 0, 'conv_rate': 0}})
+        care_metrics = all_phase_metrics.get('CARE', {'spend': 0, 'reach': 0, 'clicks': 0, 'conversions': 0, 'cpm': 0, 'ctr': 0, 'cpa': 0, 'conv_rate': 0, 'google': {'spend': 0, 'reach': 0, 'clicks': 0, 'conversions': 0, 'cpm': 0, 'ctr': 0, 'cpa': 0, 'conv_rate': 0}, 'meta': {'spend': 0, 'reach': 0, 'clicks': 0, 'conversions': 0, 'cpm': 0, 'ctr': 0, 'cpa': 0, 'conv_rate': 0}})
 
         # Save original THINK spend (from THINK-tagged campaigns only)
         original_think_spend = think_metrics['spend']
@@ -972,13 +999,19 @@ else:
 
                         cohort_size = len(cohort_customers)
                         if cohort_size > 0:
-                            returning_customers = 0
-                            for email in cohort_customers:
-                                cust_bookings = clv_data[clv_data['email'] == email]['booking_date'].sort_values()
-                                if len(cust_bookings) > 1:
-                                    second_booking = cust_bookings.iloc[1]
-                                    if second_booking <= two_months_later:
-                                        returning_customers += 1
+                            # Vectorized approach: get all bookings for cohort customers
+                            cohort_set = set(cohort_customers)
+                            cohort_bookings = clv_data[clv_data['email'].isin(cohort_set)].copy()
+
+                            # Rank bookings per customer by date
+                            cohort_bookings['booking_rank'] = cohort_bookings.groupby('email')['booking_date'].rank(method='first')
+
+                            # Get second bookings only
+                            second_bookings = cohort_bookings[cohort_bookings['booking_rank'] == 2]
+
+                            # Count customers whose second booking was within the time window
+                            returning_customers = (second_bookings['booking_date'] <= two_months_later).sum()
+
                             retention_rate = returning_customers / cohort_size
                         else:
                             retention_rate = 0.3  # Default fallback
@@ -1180,19 +1213,23 @@ else:
         display_df = display_df[display_df['campaign_name'].notna()]
         display_df = display_df[display_df['campaign_name'].astype(str).str.strip() != '']
 
-        # Calculate additional metrics
-        display_df['cpc'] = display_df.apply(
-            lambda x: x['spend'] / x['clicks'] if x['clicks'] > 0 else 0, axis=1
-        )
-        display_df['cpa'] = display_df.apply(
-            lambda x: x['spend'] / x['conversions'] if x['conversions'] > 0 else 0, axis=1
-        )
-        display_df['conv_rate'] = display_df.apply(
-            lambda x: (x['conversions'] / x['clicks'] * 100) if x['clicks'] > 0 else 0, axis=1
+        # Calculate additional metrics (vectorized)
+        display_df['cpc'] = (display_df['spend'] / display_df['clicks'].replace(0, float('nan'))).fillna(0)
+        display_df['cpa'] = (display_df['spend'] / display_df['conversions'].replace(0, float('nan'))).fillna(0)
+        display_df['conv_rate'] = (display_df['conversions'] / display_df['clicks'].replace(0, float('nan')) * 100).fillna(0)
+
+        # Create combined Reach/Impressions column (impressions for Google, reach for Meta)
+        if 'impressions' not in display_df.columns:
+            display_df['impressions'] = 0
+        if 'reach' not in display_df.columns:
+            display_df['reach'] = 0
+        # Vectorized: use impressions for Google, reach for Meta
+        display_df['reach_impr'] = display_df['impressions'].where(
+            display_df['Platform'] == 'Google Ads', display_df['reach']
         )
 
         # Select and rename columns
-        display_cols = ['campaign_name', 'Platform', 'stdc_phase', 'spend', 'clicks', 'conversions', 'conversion_value', 'cpc', 'cpa', 'conv_rate']
+        display_cols = ['campaign_name', 'Platform', 'stdc_phase', 'spend', 'reach_impr', 'clicks', 'conversions', 'conversion_value', 'cpc', 'cpa', 'conv_rate']
         display_cols = [c for c in display_cols if c in display_df.columns]
 
         display_df = display_df[display_cols].copy()
@@ -1200,6 +1237,7 @@ else:
             'campaign_name': 'Campaign',
             'stdc_phase': 'STDC',
             'spend': 'Spend',
+            'reach_impr': 'Reach/Impr',
             'clicks': 'Clicks',
             'conversions': 'Conv',
             'conversion_value': 'Value',
@@ -1209,7 +1247,7 @@ else:
         })
 
         # Round numeric columns appropriately
-        int_cols = ['Spend', 'Clicks', 'Conv', 'Value']
+        int_cols = ['Spend', 'Reach/Impr', 'Clicks', 'Conv', 'Value']
         for col in int_cols:
             if col in display_df.columns:
                 display_df[col] = display_df[col].round(0).astype(int)
@@ -1245,6 +1283,7 @@ else:
             'Platform': st.column_config.TextColumn('Platform', help='Google Ads or Meta Ads'),
             'STDC': st.column_config.TextColumn('STDC', help='SEE-THINK-DO-CARE funnel phase'),
             'Spend': st.column_config.NumberColumn('Spend', help='Total ad spend for this campaign', format='€%d'),
+            'Reach/Impr': st.column_config.NumberColumn('Reach/Impr', help='Impressions (Google) or Reach (Meta)'),
             'Clicks': st.column_config.NumberColumn('Clicks', help='Link clicks on ads'),
             'Conv': st.column_config.NumberColumn('Conv', help='Purchases/conversions tracked'),
             'Value': st.column_config.NumberColumn('Value', help='Conversion value reported', format='€%d'),
