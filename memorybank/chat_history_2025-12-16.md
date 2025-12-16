@@ -58,6 +58,42 @@
 - Added filter to only show locations starting with "Kuuma"
 - Excludes test data like "UTM test" from the location dropdown and calculations
 
+### 5. Revenue Page Performance Optimization
+**Commit:** `1e10dd1`
+- Replaced slow O(n²) loops and lambda functions with vectorized pandas operations
+- Optimizations made:
+  - Retention rate calculation: Use `rank()` instead of per-customer loop
+  - Customer metrics: Vectorized interval calculation instead of lambda in groupby
+  - Segment CLV: Pre-calculated booking ranks and set operations
+  - Location CLV: Pre-aggregated stats and vectorized retention
+
+### 6. Data Quality Explanation
+**Commit:** `7212f01`
+- Added "(likely cancelled bookings)" explanation to unmatched records in Data Quality summary
+- Message now shows: "X unmatched (likely cancelled bookings)"
+
+### 7. Hide "Press Enter to apply" Tooltip
+**Commit:** `5f26010`
+- Added CSS to hide the InputInstructions tooltip that overlapped with password field eye icon
+- Added `[data-testid="InputInstructions"] { display: none; }` to global styles
+
+### 8. Local Data Loading for Development
+- Added `load_local_files()` and `has_local_data()` functions to app.py
+- App now automatically loads data from local folders when running locally (before trying Google Drive)
+- **Folder structure:**
+  ```
+  ../booking data/
+  ├── The day the booking was made*.xls  → Loaded as df1 (booking creation dates)
+  ├── The date booked*.xls               → Loaded as df2 (visit dates)
+  └── Bezettings analyse.xlsx            → (capacity reference)
+
+  ../marketing data/
+  ├── *google*.csv                       → Loaded as google_ads_df
+  └── *meta*.csv                         → Loaded as meta_ads_df
+  ```
+- File detection based on filename patterns (case-insensitive)
+- Priority: Local data → Google Drive → Manual upload
+
 ## Technical Details
 
 ### Location Capacity Configuration (LOCATION_CAPACITY)
@@ -83,10 +119,15 @@ LOCATION_CAPACITY = {
 - **Onderbenut**: 50-55% total, 70-75% weekend, 60-65% peak, 25-30% off-peak
 
 ## Data Sources
-- **Booking data (df1)**: Excel files from Google Drive containing booking creation data
+- **Booking data (df1)**: Excel files containing booking creation data
 - **Visit data (df2)**: Excel files with visit dates (used for capacity analysis)
 - **Google Ads**: CSV files with campaign performance
 - **Meta Ads**: CSV files with campaign performance
+
+**Data Loading Priority:**
+1. Local folders (`../booking data/` and `../marketing data/`) - for development
+2. Google Drive (configured via Streamlit secrets) - for production
+3. Manual file upload via sidebar
 
 ## Known Issues / Notes
 - Some locations may not have capacity data configured (Bloemendaal, Den Bosch, Nijmegen NYMA)

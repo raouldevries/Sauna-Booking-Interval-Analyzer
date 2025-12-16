@@ -7,6 +7,8 @@ import requests
 import numpy as np
 from io import BytesIO, StringIO
 import time
+import os
+import glob
 from data_loader import init_session_state, get_location_column, get_available_locations
 
 # Google Drive imports
@@ -282,6 +284,146 @@ def load_files_from_drive(progress_callback=None):
 
     return df1, df2, google_ads_df, meta_ads_df, None
 
+
+def load_local_files():
+    """Load files from local 'booking data' and 'marketing data' folders for development/testing."""
+    # Use parent directory folders
+    parent_dir = os.path.dirname(os.path.dirname(__file__))
+    booking_data_path = os.path.join(parent_dir, 'booking data')
+    marketing_data_path = os.path.join(parent_dir, 'marketing data')
+
+    # Load booking creation files (files with "day the booking was made" in name)
+    df1 = None
+    if os.path.exists(booking_data_path):
+        all_files = glob.glob(os.path.join(booking_data_path, '*.xls')) + glob.glob(os.path.join(booking_data_path, '*.xlsx'))
+        booking_files = [f for f in all_files if 'day the booking was made' in os.path.basename(f).lower() or 'booking was made' in os.path.basename(f).lower()]
+        if booking_files:
+            dfs = []
+            for f in booking_files:
+                try:
+                    engine = 'xlrd' if f.endswith('.xls') else 'openpyxl'
+                    df = pd.read_excel(f, engine=engine)
+                    dfs.append(df)
+                except Exception:
+                    pass
+            if dfs:
+                df1 = pd.concat(dfs, ignore_index=True)
+                if 'Activity' in df1.columns and 'Tour' in df1.columns:
+                    df1['Location'] = df1['Activity'].fillna(df1['Tour'])
+                elif 'Activity' in df1.columns:
+                    df1['Location'] = df1['Activity']
+                elif 'Tour' in df1.columns:
+                    df1['Location'] = df1['Tour']
+
+    # Load visit date files (files with "date booked" or "dated booked" in name)
+    df2 = None
+    if os.path.exists(booking_data_path):
+        all_files = glob.glob(os.path.join(booking_data_path, '*.xls')) + glob.glob(os.path.join(booking_data_path, '*.xlsx'))
+        visit_files = [f for f in all_files if 'date booked' in os.path.basename(f).lower() or 'dated booked' in os.path.basename(f).lower()]
+        if visit_files:
+            dfs = []
+            for f in visit_files:
+                try:
+                    engine = 'xlrd' if f.endswith('.xls') else 'openpyxl'
+                    df = pd.read_excel(f, engine=engine)
+                    dfs.append(df)
+                except Exception:
+                    pass
+            if dfs:
+                df2 = pd.concat(dfs, ignore_index=True)
+                if 'Activity' in df2.columns and 'Tour' in df2.columns:
+                    df2['Location'] = df2['Activity'].fillna(df2['Tour'])
+                elif 'Activity' in df2.columns:
+                    df2['Location'] = df2['Activity']
+                elif 'Tour' in df2.columns:
+                    df2['Location'] = df2['Tour']
+
+    # Load marketing files from 'marketing data' folder
+    google_ads_df = None
+    meta_ads_df = None
+    if os.path.exists(marketing_data_path):
+        csv_files = glob.glob(os.path.join(marketing_data_path, '*.csv'))
+
+        google_dfs = []
+        meta_dfs = []
+
+        for f in csv_files:
+            name_lower = os.path.basename(f).lower()
+            try:
+                if 'google' in name_lower:
+                    with open(f, 'r', encoding='utf-8') as file:
+                        content = file.read()
+                    lines = content.split('\n')
+                    csv_content = '\n'.join(lines[2:])  # Skip first 2 header rows
+                    df = pd.read_csv(StringIO(csv_content))
+                    df['Platform'] = 'Google Ads'
+                    column_mapping = {
+                        'Campaign': 'campaign_name', 'Cost': 'spend',
+                        'Conversions': 'conversions', 'Conv. value': 'conversion_value',
+                        'Clicks': 'clicks', 'Impr.': 'impressions', 'CTR': 'ctr',
+                        'Avg. CPC': 'cpc', 'Avg. cost': 'avg_cost'
+                    }
+                    df = df.rename(columns=column_mapping)
+                    for col in ['spend', 'conversions', 'conversion_value', 'clicks', 'impressions']:
+                        if col in df.columns:
+                            df[col] = df[col].astype(str).str.replace(',', '', regex=False)
+                            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+                    google_dfs.append(df)
+                elif 'meta' in name_lower:
+                    df = pd.read_csv(f)
+                    df['Platform'] = 'Meta Ads'
+                    column_mapping = {
+                        'Campaign name': 'campaign_name', 'Amount spent (EUR)': 'spend',
+                        'Purchases': 'conversions', 'Purchases conversion value': 'conversion_value',
+                        'Reach': 'reach', 'Link clicks': 'clicks',
+                        'CTR (link click-through rate)': 'ctr',
+                        'CPC (cost per link click) (EUR)': 'cpc',
+                        'CPM (cost per 1,000 impressions) (EUR)': 'cpm',
+                        'Results': 'results'
+                    }
+                    df = df.rename(columns=column_mapping)
+                    for col in ['spend', 'conversions', 'conversion_value', 'reach', 'clicks', 'results']:
+                        if col in df.columns:
+                            df[col] = df[col].astype(str).str.replace(',', '', regex=False)
+                            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+                    meta_dfs.append(df)
+            except Exception:
+                pass
+
+        if google_dfs:
+            google_ads_df = pd.concat(google_dfs, ignore_index=True)
+        if meta_dfs:
+            meta_ads_df = pd.concat(meta_dfs, ignore_index=True)
+
+    # Check if any data was loaded
+    if df1 is None and df2 is None and google_ads_df is None and meta_ads_df is None:
+        return None, None, None, None, "No data files found in local_data folders"
+
+    return df1, df2, google_ads_df, meta_ads_df, None
+
+
+def has_local_data():
+    """Check if local 'booking data' or 'marketing data' folders have data files."""
+    parent_dir = os.path.dirname(os.path.dirname(__file__))
+    booking_data_path = os.path.join(parent_dir, 'booking data')
+    marketing_data_path = os.path.join(parent_dir, 'marketing data')
+
+    # Check for Excel files in booking data folder
+    if os.path.exists(booking_data_path):
+        files = glob.glob(os.path.join(booking_data_path, '*.xls')) + \
+                glob.glob(os.path.join(booking_data_path, '*.xlsx'))
+        if files:
+            return True
+
+    # Check for CSV files in marketing data folder
+    if os.path.exists(marketing_data_path):
+        files = glob.glob(os.path.join(marketing_data_path, '*.csv'))
+        if files:
+            return True
+
+    return False
+
+
 # Password protection - Show login page if not authenticated
 if not st.session_state.authenticated:
     # Hide sidebar on login page and style login button
@@ -322,8 +464,31 @@ if not st.session_state.authenticated:
             if password == "Kuuma2026!":
                 st.session_state.authenticated = True
 
-                # Load data immediately after login with progress bar
-                if GOOGLE_DRIVE_AVAILABLE and "gcp_service_account" in st.secrets and "google_drive" in st.secrets:
+                # Load data immediately after login
+                # First check for local data (for development/testing)
+                if has_local_data():
+                    progress_bar = st.progress(0, text="Loading local data...")
+                    progress_bar.progress(50, text="Loading local files...")
+
+                    df1, df2, google_ads_df, meta_ads_df, error = load_local_files()
+
+                    progress_bar.progress(95, text="Processing data...")
+                    if df1 is not None:
+                        st.session_state.df1 = df1
+                    if df2 is not None:
+                        st.session_state.df2 = df2
+                    if google_ads_df is not None:
+                        st.session_state.google_ads_df = google_ads_df
+                    if meta_ads_df is not None:
+                        st.session_state.meta_ads_df = meta_ads_df
+                    st.session_state.drive_loaded = True
+
+                    progress_bar.progress(100, text="Complete!")
+                    time.sleep(0.3)
+                    progress_bar.empty()
+
+                # Otherwise try Google Drive
+                elif GOOGLE_DRIVE_AVAILABLE and "gcp_service_account" in st.secrets and "google_drive" in st.secrets:
                     progress_bar = st.progress(0, text="Connecting to Google Drive...")
 
                     # Progress callback that updates the progress bar
@@ -427,9 +592,36 @@ nav_container = st.sidebar.container()
 # Sidebar - Data section
 st.sidebar.header("Data")
 
-# Try to load from Google Drive automatically
-if GOOGLE_DRIVE_AVAILABLE and "gcp_service_account" in st.secrets and "google_drive" in st.secrets:
-    if not st.session_state.drive_loaded:
+# Try to load data automatically (local first, then Google Drive)
+if not st.session_state.drive_loaded:
+    # First check for local data (for development/testing)
+    if has_local_data():
+        progress_bar = st.sidebar.progress(0, text="Loading local data...")
+        progress_bar.progress(50, text="Loading local files...")
+
+        df1, df2, google_ads_df, meta_ads_df, error = load_local_files()
+
+        if error:
+            progress_bar.empty()
+            st.sidebar.warning(f"Local: {error}")
+        else:
+            progress_bar.progress(95, text="Processing data...")
+            if df1 is not None:
+                st.session_state.df1 = df1
+            if df2 is not None:
+                st.session_state.df2 = df2
+            if google_ads_df is not None:
+                st.session_state.google_ads_df = google_ads_df
+            if meta_ads_df is not None:
+                st.session_state.meta_ads_df = meta_ads_df
+
+            progress_bar.progress(100, text="Complete!")
+            time.sleep(0.3)
+            progress_bar.empty()
+            st.session_state.drive_loaded = True
+
+    # Otherwise try Google Drive
+    elif GOOGLE_DRIVE_AVAILABLE and "gcp_service_account" in st.secrets and "google_drive" in st.secrets:
         progress_bar = st.sidebar.progress(0, text="Connecting to Google Drive...")
 
         # Progress callback for sidebar
@@ -457,17 +649,18 @@ if GOOGLE_DRIVE_AVAILABLE and "gcp_service_account" in st.secrets and "google_dr
             progress_bar.empty()
             st.session_state.drive_loaded = True
 
-    # Show loaded status
-    if st.session_state.df1 is not None:
-        st.sidebar.success(f"Booking data: {len(st.session_state.df1):,} rows")
-    if st.session_state.df2 is not None:
-        st.sidebar.success(f"Visit data: {len(st.session_state.df2):,} rows")
-    if st.session_state.google_ads_df is not None:
-        st.sidebar.success(f"Google Ads: {len(st.session_state.google_ads_df):,} rows")
-    if st.session_state.meta_ads_df is not None:
-        st.sidebar.success(f"Meta Ads: {len(st.session_state.meta_ads_df):,} rows")
+# Show loaded status
+if st.session_state.df1 is not None:
+    st.sidebar.success(f"Booking data: {len(st.session_state.df1):,} rows")
+if st.session_state.df2 is not None:
+    st.sidebar.success(f"Visit data: {len(st.session_state.df2):,} rows")
+if st.session_state.google_ads_df is not None:
+    st.sidebar.success(f"Google Ads: {len(st.session_state.google_ads_df):,} rows")
+if st.session_state.meta_ads_df is not None:
+    st.sidebar.success(f"Meta Ads: {len(st.session_state.meta_ads_df):,} rows")
 
-    # Manual upload option (in expander)
+# Manual upload option (in expander) - show when data is loaded from Drive or local
+if st.session_state.drive_loaded:
     with st.sidebar.expander("Upload different files"):
         uploaded_files1 = st.file_uploader(
             "Booking Creation Dates (.xls/.xlsx)",
@@ -503,8 +696,8 @@ if GOOGLE_DRIVE_AVAILABLE and "gcp_service_account" in st.secrets and "google_dr
                 st.session_state.df2 = df2
                 st.success(f"Loaded: {len(df2):,} rows")
 
-else:
-    # No Google Drive configured - show standard upload
+if not st.session_state.drive_loaded:
+    # No data loaded - show standard upload
     st.sidebar.info("Upload your Bookeo export files")
 
     uploaded_files1 = st.sidebar.file_uploader(
