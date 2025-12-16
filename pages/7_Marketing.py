@@ -1611,13 +1611,15 @@ else:
             # ===== TAB 3: CAPACITY =====
             with tab3:
                 st.markdown("#### Capacity & Marketing Alignment")
-                st.caption("Compare marketing investment with location capacity utilization")
 
                 # Build capacity data
                 capacity_data = []
 
                 # Calculate num_weeks dynamically based on booking data date range
                 num_weeks = 4  # Default
+                date_range_str = ""
+                min_date = None
+                max_date = None
                 if st.session_state.df1 is not None:
                     df1_temp = st.session_state.df1
                     date_col = None
@@ -1628,8 +1630,17 @@ else:
                     if date_col:
                         dates = pd.to_datetime(df1_temp[date_col], errors='coerce').dropna()
                         if len(dates) > 0:
-                            date_range_days = (dates.max() - dates.min()).days + 1
+                            min_date = dates.min()
+                            max_date = dates.max()
+                            date_range_days = (max_date - min_date).days + 1
                             num_weeks = max(1, date_range_days // 7)  # At least 1 week
+                            date_range_str = f"{min_date.strftime('%b %d')} - {max_date.strftime('%b %d, %Y')}"
+
+                # Show period info
+                if date_range_str:
+                    st.caption(f"**Period:** {date_range_str} ({num_weeks} weeks) · Capacity = weekly capacity × {num_weeks} weeks")
+                else:
+                    st.caption(f"Compare marketing investment with location capacity utilization ({num_weeks} weeks)")
 
                 for loc in loc_summary['Location'].tolist():
                     cap_info = get_capacity_per_location(loc, num_weeks)
@@ -1712,11 +1723,11 @@ else:
                     # Column config with help tooltips
                     capacity_column_config = {
                         'Location': st.column_config.TextColumn('Location'),
-                        'Capacity': st.column_config.TextColumn('Capacity', help='Total available slots (weekly capacity × 4 weeks)'),
+                        'Capacity': st.column_config.TextColumn('Capacity', help=f'Total available slots (weekly capacity × {num_weeks} weeks)'),
                         'Bookings': st.column_config.TextColumn('Bookings', help='Actual bookings from booking system'),
-                        'Occupancy': st.column_config.TextColumn('Occupancy', help='Bookings / Capacity'),
+                        'Occupancy': st.column_config.TextColumn('Occupancy', help='Bookings / Capacity (capped at 100%)'),
                         'Ad Spend': st.column_config.TextColumn('Ad Spend', help='Marketing spend per location'),
-                        'Available': st.column_config.TextColumn('Available', help='Remaining slots (Capacity - Bookings)'),
+                        'Available': st.column_config.TextColumn('Available', help='Remaining slots (Capacity - Bookings, min 0)'),
                         'Cost/Slot': st.column_config.TextColumn('Cost/Slot', help='Ad Spend / Bookings filled'),
                         'Status': st.column_config.TextColumn('Status', help='Based on 65% occupancy threshold. Efficient = ≥65% occ + below median spend | Performing = ≥65% occ + above median spend | Opportunity = <65% occ + below median spend | Review = <65% occ + above median spend'),
                     }
