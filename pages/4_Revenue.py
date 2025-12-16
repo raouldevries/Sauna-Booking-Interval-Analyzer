@@ -324,34 +324,35 @@ else:
             if location_col != "None" and 'location' in processed_data.columns:
                 st.markdown("#### Revenue by Location")
 
-                location_revenue = processed_data.groupby('location').agg({
-                    'revenue': ['sum', 'mean', 'median', 'count']
-                }).round(2)
-                location_revenue.columns = ['Total Revenue', 'Avg Booking', 'Median Booking', 'Bookings']
-                location_revenue = location_revenue.sort_values('Total Revenue', ascending=False)
-                location_revenue['% of Revenue'] = (location_revenue['Total Revenue'] / total_revenue * 100).round(1)
-                location_revenue = location_revenue[['Total Revenue', '% of Revenue', 'Bookings', 'Avg Booking', 'Median Booking']]
+                with st.spinner("Loading revenue by location..."):
+                    location_revenue = processed_data.groupby('location').agg({
+                        'revenue': ['sum', 'mean', 'median', 'count']
+                    }).round(2)
+                    location_revenue.columns = ['Total Revenue', 'Avg Booking', 'Median Booking', 'Bookings']
+                    location_revenue = location_revenue.sort_values('Total Revenue', ascending=False)
+                    location_revenue['% of Revenue'] = (location_revenue['Total Revenue'] / total_revenue * 100).round(1)
+                    location_revenue = location_revenue[['Total Revenue', '% of Revenue', 'Bookings', 'Avg Booking', 'Median Booking']]
 
-                revenue_loc_config = {
-                    'Total Revenue': st.column_config.NumberColumn('Total Revenue', help='Sum of all booking revenue', format="€%.0f"),
-                    '% of Revenue': st.column_config.NumberColumn('% of Revenue', help='Share of total company revenue'),
-                    'Bookings': st.column_config.NumberColumn('Bookings', help='Number of bookings'),
-                    'Avg Booking': st.column_config.NumberColumn('Avg Booking', help='Average revenue per booking', format="€%.2f"),
-                    'Median Booking': st.column_config.NumberColumn('Median Booking', help='Typical booking value (ignoring outliers)', format="€%.2f"),
-                }
-                st.dataframe(location_revenue, use_container_width=True, column_config=revenue_loc_config)
+                    revenue_loc_config = {
+                        'Total Revenue': st.column_config.NumberColumn('Total Revenue', help='Sum of all booking revenue', format="€%.0f"),
+                        '% of Revenue': st.column_config.NumberColumn('% of Revenue', help='Share of total company revenue'),
+                        'Bookings': st.column_config.NumberColumn('Bookings', help='Number of bookings'),
+                        'Avg Booking': st.column_config.NumberColumn('Avg Booking', help='Average revenue per booking', format="€%.2f"),
+                        'Median Booking': st.column_config.NumberColumn('Median Booking', help='Typical booking value (ignoring outliers)', format="€%.2f"),
+                    }
+                    st.dataframe(location_revenue, use_container_width=True, column_config=revenue_loc_config)
 
-                # Revenue chart
-                fig_rev_loc = px.bar(
-                    location_revenue.reset_index(),
-                    x='location',
-                    y='Total Revenue',
-                    title="Revenue by Location",
-                    labels={'location': 'Location', 'Total Revenue': 'Revenue (€)'}
-                )
-                fig_rev_loc.update_traces(marker_color='#2ecc71')
-                fig_rev_loc.update_layout(height=450, xaxis_tickangle=-45)
-                st.plotly_chart(fig_rev_loc, use_container_width=True)
+                    # Revenue chart
+                    fig_rev_loc = px.bar(
+                        location_revenue.reset_index(),
+                        x='location',
+                        y='Total Revenue',
+                        title="Revenue by Location",
+                        labels={'location': 'Location', 'Total Revenue': 'Revenue (€)'}
+                    )
+                    fig_rev_loc.update_traces(marker_color='#2ecc71')
+                    fig_rev_loc.update_layout(height=450, xaxis_tickangle=-45)
+                    st.plotly_chart(fig_rev_loc, use_container_width=True)
 
             # ==================== CUSTOMER VALUE ====================
             st.markdown("---")
@@ -366,11 +367,12 @@ else:
                 if len(customer_data) == 0:
                     st.warning("No valid email addresses found in the data.")
                 else:
-                    customer_value = customer_data.groupby('email').agg({
-                        'booking_id': 'count',
-                        'revenue': 'sum'
-                    }).reset_index()
-                    customer_value.columns = ['email', 'bookings', 'lifetime_value']
+                    with st.spinner("Analyzing customer segments..."):
+                        customer_value = customer_data.groupby('email').agg({
+                            'booking_id': 'count',
+                            'revenue': 'sum'
+                        }).reset_index()
+                        customer_value.columns = ['email', 'bookings', 'lifetime_value']
 
                     # Customer tiers (same as Recurring Customers page)
                     def categorize_customer(bookings):
@@ -799,34 +801,36 @@ else:
                     col1, col2 = st.columns(2)
 
                     with col1:
-                        fig_seg_clv = px.bar(
-                            segment_clv_df,
-                            x='Segment',
-                            y='CLV',
-                            title="CLV by Segment",
-                            labels={'CLV': 'CLV (€)'},
-                            text=segment_clv_df['CLV'].apply(lambda x: f"€{x:.0f}"),
-                            color='Segment',
-                            color_discrete_map={'New': '#3498db', 'Regular': '#f39c12', 'VIP': '#9b59b6'}
-                        )
-                        fig_seg_clv.update_traces(textposition='outside')
-                        fig_seg_clv.update_layout(height=450, showlegend=False, margin=dict(t=50))
-                        st.plotly_chart(fig_seg_clv, use_container_width=True)
+                        with st.spinner("Loading CLV chart..."):
+                            fig_seg_clv = px.bar(
+                                segment_clv_df,
+                                x='Segment',
+                                y='CLV',
+                                title="CLV by Segment",
+                                labels={'CLV': 'CLV (€)'},
+                                text=segment_clv_df['CLV'].apply(lambda x: f"€{x:.0f}"),
+                                color='Segment',
+                                color_discrete_map={'New': '#3498db', 'Regular': '#f39c12', 'VIP': '#9b59b6'}
+                            )
+                            fig_seg_clv.update_traces(textposition='outside')
+                            fig_seg_clv.update_layout(height=450, showlegend=False, margin=dict(t=50))
+                            st.plotly_chart(fig_seg_clv, use_container_width=True)
 
                     with col2:
-                        fig_seg_retention = px.bar(
-                            segment_clv_df,
-                            x='Segment',
-                            y='Retention Rate',
-                            title="Retention Rate by Segment",
-                            labels={'Retention Rate': 'Retention Rate'},
-                            text=segment_clv_df['Retention Rate'].apply(lambda x: f"{x:.1%}"),
-                            color='Segment',
-                            color_discrete_map={'New': '#3498db', 'Regular': '#f39c12', 'VIP': '#9b59b6'}
-                        )
-                        fig_seg_retention.update_traces(textposition='outside')
-                        fig_seg_retention.update_layout(height=450, showlegend=False, margin=dict(t=50))
-                        st.plotly_chart(fig_seg_retention, use_container_width=True)
+                        with st.spinner("Loading retention chart..."):
+                            fig_seg_retention = px.bar(
+                                segment_clv_df,
+                                x='Segment',
+                                y='Retention Rate',
+                                title="Retention Rate by Segment",
+                                labels={'Retention Rate': 'Retention Rate'},
+                                text=segment_clv_df['Retention Rate'].apply(lambda x: f"{x:.1%}"),
+                                color='Segment',
+                                color_discrete_map={'New': '#3498db', 'Regular': '#f39c12', 'VIP': '#9b59b6'}
+                            )
+                            fig_seg_retention.update_traces(textposition='outside')
+                            fig_seg_retention.update_layout(height=450, showlegend=False, margin=dict(t=50))
+                            st.plotly_chart(fig_seg_retention, use_container_width=True)
 
                     # ===== CLV BY LOCATION =====
                     if location_col != "None" and 'location' in customer_data.columns:
@@ -905,17 +909,18 @@ else:
                             st.dataframe(location_display, use_container_width=True, hide_index=True, column_config=loc_clv_config)
 
                             # Location CLV Chart
-                            fig_loc_clv = px.bar(
-                                location_clv_df,
-                                x='Location',
-                                y='CLV',
-                                title="CLV by Location",
-                                labels={'CLV': 'CLV (€)'},
-                                text=location_clv_df['CLV'].apply(lambda x: f"€{x:.0f}")
-                            )
-                            fig_loc_clv.update_traces(marker_color='#1abc9c', textposition='outside')
-                            fig_loc_clv.update_layout(height=450, xaxis_tickangle=-45, margin=dict(t=50))
-                            st.plotly_chart(fig_loc_clv, use_container_width=True)
+                            with st.spinner("Loading location CLV chart..."):
+                                fig_loc_clv = px.bar(
+                                    location_clv_df,
+                                    x='Location',
+                                    y='CLV',
+                                    title="CLV by Location",
+                                    labels={'CLV': 'CLV (€)'},
+                                    text=location_clv_df['CLV'].apply(lambda x: f"€{x:.0f}")
+                                )
+                                fig_loc_clv.update_traces(marker_color='#1abc9c', textposition='outside')
+                                fig_loc_clv.update_layout(height=450, xaxis_tickangle=-45, margin=dict(t=50))
+                                st.plotly_chart(fig_loc_clv, use_container_width=True)
 
                     # ===== INSIGHTS =====
                     st.markdown("---")
