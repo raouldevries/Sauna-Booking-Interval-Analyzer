@@ -1303,12 +1303,26 @@ else:
             avg_cpa = total_spend / total_conv if total_conv > 0 else 0
             avg_roas = total_value / total_spend if total_spend > 0 else 0
 
-            # Get revenue data from booking files
+            # Get revenue data from booking files (filtered by selected date range)
             revenue_data = {}
             if st.session_state.df1 is not None:
-                df1 = st.session_state.df1
+                df1 = st.session_state.df1.copy()
                 location_col = 'Location' if 'Location' in df1.columns else ('Tour' if 'Tour' in df1.columns else ('Activity' if 'Activity' in df1.columns else None))
                 revenue_col = 'Total gross' if 'Total gross' in df1.columns else None
+
+                # Filter df1 by selected date range if available
+                if 'date_range' in dir() and len(date_range) == 2:
+                    date_col = None
+                    for col in ['Start', 'Created', 'Date', 'Booking date']:
+                        if col in df1.columns:
+                            date_col = col
+                            break
+                    if date_col:
+                        df1[date_col] = pd.to_datetime(df1[date_col], errors='coerce')
+                        start_date = pd.Timestamp(date_range[0])
+                        end_date = pd.Timestamp(date_range[1])
+                        df1 = df1[(df1[date_col] >= start_date) & (df1[date_col] <= end_date)]
+
                 if location_col:
                     revenue_data = get_revenue_per_location(df1, location_col, revenue_col)
 
