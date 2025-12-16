@@ -102,16 +102,27 @@ def download_drive_file(file_id, file_name):
     file_buffer.name = file_name
     return file_buffer
 
-def load_files_from_drive():
-    """Load booking, visit date, and marketing files from Google Drive."""
+def load_files_from_drive(progress_callback=None):
+    """Load booking, visit date, and marketing files from Google Drive.
+
+    Args:
+        progress_callback: Optional function(progress: int, text: str) to report loading progress
+    """
+    def update_progress(progress, text):
+        if progress_callback:
+            progress_callback(progress, text)
+
     if "google_drive" not in st.secrets:
         return None, None, None, None, "No Google Drive folder configured"
 
+    update_progress(5, "Connecting to Google Drive...")
     folder_id = st.secrets["google_drive"]["folder_id"]
     files = list_drive_files(folder_id)
 
     if not files:
         return None, None, None, None, "No files found in Drive folder"
+
+    update_progress(10, "Scanning files...")
 
     # Separate files by type
     booking_files = []
@@ -140,11 +151,19 @@ def load_files_from_drive():
         elif 'booking' in name_lower or 'created' in name_lower or 'boeking' in name_lower:
             booking_files.append(f)
 
+    # Calculate total files for progress
+    total_files = len(booking_files) + len(visit_files) + len(google_ads_files) + len(meta_ads_files)
+    files_loaded = 0
+    base_progress = 15  # Start at 15% after scanning
+    progress_per_file = 70 / max(total_files, 1)  # Use 15-85% for file loading
+
     # Load and merge booking files
     df1 = None
     if booking_files:
         dfs = []
         for f in booking_files:
+            file_name = f['name'][:40] + '...' if len(f['name']) > 40 else f['name']
+            update_progress(int(base_progress + files_loaded * progress_per_file), f"Loading: {file_name}")
             file_buffer = download_drive_file(f['id'], f['name'])
             if file_buffer:
                 try:
@@ -153,6 +172,7 @@ def load_files_from_drive():
                     dfs.append(df)
                 except Exception:
                     pass
+            files_loaded += 1
         if dfs:
             df1 = pd.concat(dfs, ignore_index=True)
             if 'Activity' in df1.columns and 'Tour' in df1.columns:
@@ -167,6 +187,8 @@ def load_files_from_drive():
     if visit_files:
         dfs = []
         for f in visit_files:
+            file_name = f['name'][:40] + '...' if len(f['name']) > 40 else f['name']
+            update_progress(int(base_progress + files_loaded * progress_per_file), f"Loading: {file_name}")
             file_buffer = download_drive_file(f['id'], f['name'])
             if file_buffer:
                 try:
@@ -175,6 +197,7 @@ def load_files_from_drive():
                     dfs.append(df)
                 except Exception:
                     pass
+            files_loaded += 1
         if dfs:
             df2 = pd.concat(dfs, ignore_index=True)
             if 'Activity' in df2.columns and 'Tour' in df2.columns:
@@ -189,6 +212,8 @@ def load_files_from_drive():
     if google_ads_files:
         dfs = []
         for f in google_ads_files:
+            file_name = f['name'][:40] + '...' if len(f['name']) > 40 else f['name']
+            update_progress(int(base_progress + files_loaded * progress_per_file), f"Loading: {file_name}")
             file_buffer = download_drive_file(f['id'], f['name'])
             if file_buffer:
                 try:
@@ -212,6 +237,7 @@ def load_files_from_drive():
                     dfs.append(df)
                 except Exception:
                     pass
+            files_loaded += 1
         if dfs:
             google_ads_df = pd.concat(dfs, ignore_index=True)
 
@@ -220,6 +246,8 @@ def load_files_from_drive():
     if meta_ads_files:
         dfs = []
         for f in meta_ads_files:
+            file_name = f['name'][:40] + '...' if len(f['name']) > 40 else f['name']
+            update_progress(int(base_progress + files_loaded * progress_per_file), f"Loading: {file_name}")
             file_buffer = download_drive_file(f['id'], f['name'])
             if file_buffer:
                 try:
@@ -242,8 +270,11 @@ def load_files_from_drive():
                     dfs.append(df)
                 except Exception:
                     pass
+            files_loaded += 1
         if dfs:
             meta_ads_df = pd.concat(dfs, ignore_index=True)
+
+    update_progress(90, "Finalizing...")
 
     return df1, df2, google_ads_df, meta_ads_df, None
 
@@ -291,17 +322,15 @@ if not st.session_state.authenticated:
                 if GOOGLE_DRIVE_AVAILABLE and "gcp_service_account" in st.secrets and "google_drive" in st.secrets:
                     progress_bar = st.progress(0, text="Connecting to Google Drive...")
 
-                    # Animate progress while connecting (0-30%)
-                    for i in range(30):
-                        time.sleep(0.02)
-                        progress_bar.progress(i + 1, text="Connecting to Google Drive...")
+                    # Progress callback that updates the progress bar
+                    def update_login_progress(progress, text):
+                        progress_bar.progress(min(progress, 100), text=text)
 
-                    # Load data (progress jumps during actual loading)
-                    progress_bar.progress(35, text="Loading booking data...")
-                    df1, df2, google_ads_df, meta_ads_df, error = load_files_from_drive()
+                    # Load data with progress callback
+                    df1, df2, google_ads_df, meta_ads_df, error = load_files_from_drive(progress_callback=update_login_progress)
 
                     # Store data in session state
-                    progress_bar.progress(70, text="Processing data...")
+                    update_login_progress(95, "Processing data...")
                     if df1 is not None:
                         st.session_state.df1 = df1
                     if df2 is not None:
@@ -312,11 +341,8 @@ if not st.session_state.authenticated:
                         st.session_state.meta_ads_df = meta_ads_df
                     st.session_state.drive_loaded = True
 
-                    # Complete progress animation (70-100%)
-                    for i in range(70, 100):
-                        time.sleep(0.01)
-                        progress_bar.progress(i + 1, text="Finalizing...")
-
+                    # Complete progress
+                    update_login_progress(100, "Complete!")
                     time.sleep(0.3)
                     progress_bar.empty()
 
@@ -402,32 +428,27 @@ if GOOGLE_DRIVE_AVAILABLE and "gcp_service_account" in st.secrets and "google_dr
     if not st.session_state.drive_loaded:
         progress_bar = st.sidebar.progress(0, text="Connecting to Google Drive...")
 
-        # Animate progress while loading
-        progress_bar.progress(10, text="Connecting to Google Drive...")
-        df1, df2, google_ads_df, meta_ads_df, error = load_files_from_drive()
+        # Progress callback for sidebar
+        def update_sidebar_progress(progress, text):
+            progress_bar.progress(min(progress, 100), text=text)
+
+        df1, df2, google_ads_df, meta_ads_df, error = load_files_from_drive(progress_callback=update_sidebar_progress)
 
         if error:
             progress_bar.empty()
             st.sidebar.warning(f"Drive: {error}")
         else:
-            progress_bar.progress(50, text="Processing booking data...")
-            time.sleep(0.2)
+            update_sidebar_progress(95, "Processing data...")
             if df1 is not None:
                 st.session_state.df1 = df1
-
-            progress_bar.progress(70, text="Processing visit data...")
-            time.sleep(0.2)
             if df2 is not None:
                 st.session_state.df2 = df2
-
-            progress_bar.progress(85, text="Processing marketing data...")
-            time.sleep(0.2)
             if google_ads_df is not None:
                 st.session_state.google_ads_df = google_ads_df
             if meta_ads_df is not None:
                 st.session_state.meta_ads_df = meta_ads_df
 
-            progress_bar.progress(100, text="Complete!")
+            update_sidebar_progress(100, "Complete!")
             time.sleep(0.3)
             progress_bar.empty()
             st.session_state.drive_loaded = True
