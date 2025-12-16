@@ -515,18 +515,17 @@ else:
 
                     # Count how many made at least one more booking in the following 2 months
                     if cohort_size > 0:
-                        # Get all bookings for cohort customers
-                        cohort_bookings = customer_data[customer_data['email'].isin(cohort_customers)]
+                        # Get all bookings for cohort customers - vectorized approach
+                        cohort_bookings = customer_data[customer_data['email'].isin(cohort_customers)].copy()
 
-                        # Find customers who booked again after their first booking within 2 months
-                        returning_customers = 0
-                        for email in cohort_customers:
-                            cust_bookings = cohort_bookings[cohort_bookings['email'] == email]['booking_date'].sort_values()
-                            if len(cust_bookings) > 1:
-                                # Check if second booking was within 2 months of cohort period end
-                                second_booking = cust_bookings.iloc[1]
-                                if second_booking <= two_months_later:
-                                    returning_customers += 1
+                        # Rank bookings per customer by date
+                        cohort_bookings['booking_rank'] = cohort_bookings.groupby('email')['booking_date'].rank(method='first')
+
+                        # Get second bookings only
+                        second_bookings = cohort_bookings[cohort_bookings['booking_rank'] == 2]
+
+                        # Count customers whose second booking was within the time window
+                        returning_customers = (second_bookings['booking_date'] <= two_months_later).sum()
 
                         retention_rate = returning_customers / cohort_size
                     else:
@@ -545,27 +544,30 @@ else:
                     # ===== DETECT LIKELY CHURNED CUSTOMERS =====
                     data_end_date = max_date
 
-                    # Calculate per-customer metrics
+                    # Calculate per-customer metrics - optimized without lambda
                     customer_metrics = customer_data.groupby('email').agg({
-                        'booking_date': ['min', 'max', 'count', lambda x: x.sort_values().diff().mean().days if len(x) > 1 else None],
+                        'booking_date': ['min', 'max', 'count'],
                         'revenue': 'sum'
                     })
-                    customer_metrics.columns = ['first_booking', 'last_booking', 'num_bookings', 'avg_interval_days', 'total_revenue']
+                    customer_metrics.columns = ['first_booking', 'last_booking', 'num_bookings', 'total_revenue']
                     customer_metrics = customer_metrics.reset_index()
+
+                    # Calculate average interval per customer (vectorized)
+                    customer_data_sorted = customer_data.sort_values(['email', 'booking_date'])
+                    customer_data_sorted['prev_booking'] = customer_data_sorted.groupby('email')['booking_date'].shift(1)
+                    customer_data_sorted['interval_days'] = (customer_data_sorted['booking_date'] - customer_data_sorted['prev_booking']).dt.days
+                    avg_intervals = customer_data_sorted.groupby('email')['interval_days'].mean().reset_index()
+                    avg_intervals.columns = ['email', 'avg_interval_days']
+                    customer_metrics = customer_metrics.merge(avg_intervals, on='email', how='left')
 
                     # Calculate days since last booking
                     customer_metrics['days_since_last'] = (data_end_date - customer_metrics['last_booking']).dt.days
 
-                    # Flag as "likely churned":
-                    # - Repeat customers: days since last > 2.5× their average interval
-                    # - Single-booking customers: 60 days threshold
-                    def is_likely_churned(row):
-                        if row['num_bookings'] == 1:
-                            return row['days_since_last'] > 60
-                        else:
-                            return row['days_since_last'] > (row['avg_interval_days'] * 2.5)
-
-                    customer_metrics['is_likely_churned'] = customer_metrics.apply(is_likely_churned, axis=1)
+                    # Flag as "likely churned" - vectorized
+                    customer_metrics['is_likely_churned'] = (
+                        ((customer_metrics['num_bookings'] == 1) & (customer_metrics['days_since_last'] > 60)) |
+                        ((customer_metrics['num_bookings'] > 1) & (customer_metrics['days_since_last'] > (customer_metrics['avg_interval_days'] * 2.5)))
+                    )
 
                     churned_count = customer_metrics['is_likely_churned'].sum()
                     active_count = len(customer_metrics) - churned_count
@@ -720,36 +722,48 @@ else:
                     **Segmentation:** VIP (5+ bookings) • Regular (2-4 bookings) • New (1 booking)
                     """)
 
-                    # Calculate segment-specific metrics with segment-specific retention rates
+                    # Calculate segment-specific metrics - optimized with vectorized operations
+                    # Pre-calculate booking ranks for all customers
+                    customer_data_ranked = customer_data.copy()
+                    customer_data_ranked['booking_rank'] = customer_data_ranked.groupby('email')['booking_date'].rank(method='first')
+
+                    # Pre-calculate segment AOVs
+                    customer_value_with_bookings = customer_value.merge(
+                        customer_data.groupby('email').agg({'revenue': 'sum', 'booking_id': 'count'}).reset_index().rename(columns={'booking_id': 'booking_count'}),
+                        on='email',
+                        how='left'
+                    )
+
                     segment_clv_data = []
+                    cohort_set = set(cohort_customers)
+
                     for segment in segment_order:
                         seg_customers = customer_value[customer_value['segment'] == segment]
                         if len(seg_customers) > 0:
-                            seg_emails = seg_customers['email'].tolist()
-                            seg_bookings = customer_data[customer_data['email'].isin(seg_emails)]
+                            seg_emails_set = set(seg_customers['email'].tolist())
+                            seg_bookings = customer_data[customer_data['email'].isin(seg_emails_set)]
 
                             # Segment AOV
                             seg_aov = seg_bookings['revenue'].sum() / len(seg_bookings) if len(seg_bookings) > 0 else 0
 
-                            # Segment retention rate (cohort-based within segment)
-                            seg_cohort = [e for e in cohort_customers if e in seg_emails]
+                            # Segment retention rate (cohort-based within segment) - vectorized
+                            seg_cohort = cohort_set & seg_emails_set
                             if len(seg_cohort) > 0:
-                                seg_returning = 0
-                                for email in seg_cohort:
-                                    cust_bookings = seg_bookings[seg_bookings['email'] == email]['booking_date'].sort_values()
-                                    if len(cust_bookings) > 1:
-                                        second_booking = cust_bookings.iloc[1]
-                                        if second_booking <= two_months_later:
-                                            seg_returning += 1
-                                seg_retention = seg_returning / len(seg_cohort) if len(seg_cohort) > 0 else retention_rate
+                                # Get second bookings for segment cohort customers
+                                seg_second_bookings = customer_data_ranked[
+                                    (customer_data_ranked['email'].isin(seg_cohort)) &
+                                    (customer_data_ranked['booking_rank'] == 2)
+                                ]
+                                seg_returning = (seg_second_bookings['booking_date'] <= two_months_later).sum()
+                                seg_retention = seg_returning / len(seg_cohort)
                             else:
                                 # Use segment-based estimation
                                 if segment == 'VIP':
-                                    seg_retention = min(retention_rate * 1.5, 0.95)  # VIPs are stickier
+                                    seg_retention = min(retention_rate * 1.5, 0.95)
                                 elif segment == 'Regular':
                                     seg_retention = retention_rate * 1.2
                                 else:
-                                    seg_retention = retention_rate * 0.7  # New customers churn more
+                                    seg_retention = retention_rate * 0.7
 
                             seg_churn = 1 - seg_retention
 
@@ -760,8 +774,7 @@ else:
                                 seg_clv = seg_aov * 10
 
                             # Churned count for segment
-                            seg_metrics = customer_metrics[customer_metrics['email'].isin(seg_emails)]
-                            seg_churned = seg_metrics['is_likely_churned'].sum()
+                            seg_churned = customer_metrics[customer_metrics['email'].isin(seg_emails_set)]['is_likely_churned'].sum()
 
                             segment_clv_data.append({
                                 'Segment': segment,
@@ -839,53 +852,63 @@ else:
 
                         st.markdown("*Location-specific analysis shows where to focus marketing efforts.*")
 
-                        # Calculate location-specific CLV
-                        location_clv_data = []
+                        # Calculate location-specific CLV - optimized
                         locations = customer_data['location'].dropna().unique()
 
+                        # Pre-aggregate location stats
+                        loc_stats = customer_data.groupby('location').agg({
+                            'revenue': ['sum', 'count'],
+                            'email': 'nunique'
+                        }).reset_index()
+                        loc_stats.columns = ['location', 'total_revenue', 'booking_count', 'customer_count']
+                        loc_stats['aov'] = loc_stats['total_revenue'] / loc_stats['booking_count']
+
+                        # Get emails per location for retention calculation
+                        loc_emails_map = customer_data.groupby('location')['email'].apply(set).to_dict()
+
+                        # Reuse customer_data_ranked from segment calculation if available, otherwise create it
+                        if 'customer_data_ranked' not in dir():
+                            customer_data_ranked = customer_data.copy()
+                            customer_data_ranked['booking_rank'] = customer_data_ranked.groupby('email')['booking_date'].rank(method='first')
+
+                        location_clv_data = []
                         for loc in locations:
-                            loc_bookings = customer_data[customer_data['location'] == loc]
-                            loc_emails = loc_bookings['email'].unique()
-                            loc_customer_count = len(loc_emails)
+                            loc_row = loc_stats[loc_stats['location'] == loc].iloc[0]
+                            loc_emails_set = loc_emails_map.get(loc, set())
+                            loc_customer_count = int(loc_row['customer_count'])
 
                             if loc_customer_count > 0:
-                                # Location AOV
-                                loc_aov = loc_bookings['revenue'].sum() / len(loc_bookings)
+                                loc_aov = loc_row['aov']
 
-                                # Location retention (use overall retention as proxy, could be refined)
-                                loc_cohort = [e for e in cohort_customers if e in loc_emails]
-                                if len(loc_cohort) > 3:  # Need enough data
-                                    loc_returning = 0
-                                    for email in loc_cohort:
-                                        cust_bookings = customer_data[customer_data['email'] == email]['booking_date'].sort_values()
-                                        if len(cust_bookings) > 1:
-                                            second_booking = cust_bookings.iloc[1]
-                                            if second_booking <= two_months_later:
-                                                loc_returning += 1
-                                    loc_retention = loc_returning / len(loc_cohort)
+                                # Location retention - vectorized
+                                loc_cohort = cohort_set & loc_emails_set
+                                if len(loc_cohort) > 3:
+                                    loc_second_bookings = customer_data_ranked[
+                                        (customer_data_ranked['email'].isin(loc_cohort)) &
+                                        (customer_data_ranked['booking_rank'] == 2)
+                                    ]
+                                    loc_returning = (loc_second_bookings['booking_date'] <= two_months_later).sum()
+                                    loc_retention = loc_returning / len(loc_cohort) if len(loc_cohort) > 0 else retention_rate
                                 else:
                                     loc_retention = retention_rate
 
                                 loc_churn = 1 - loc_retention
 
-                                # Location CLV
                                 if loc_churn > 0:
                                     loc_clv = loc_aov * (1 + loc_retention / loc_churn)
                                 else:
                                     loc_clv = loc_aov * 10
 
-                                # Location churned
-                                loc_metrics = customer_metrics[customer_metrics['email'].isin(loc_emails)]
-                                loc_churned = loc_metrics['is_likely_churned'].sum()
+                                loc_churned = customer_metrics[customer_metrics['email'].isin(loc_emails_set)]['is_likely_churned'].sum()
 
                                 location_clv_data.append({
                                     'Location': loc,
                                     'Customers': loc_customer_count,
-                                    'Bookings': len(loc_bookings),
+                                    'Bookings': int(loc_row['booking_count']),
                                     'AOV': loc_aov,
                                     'Retention Rate': loc_retention,
                                     'CLV': loc_clv,
-                                    'Likely Churned': loc_churned
+                                    'Likely Churned': int(loc_churned)
                                 })
 
                         if location_clv_data:
