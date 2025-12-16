@@ -31,6 +31,10 @@ hide_default_nav = """
 [data-testid="stSidebarNav"] {
     display: none;
 }
+/* Hide "Press Enter to apply" tooltip on text inputs */
+[data-testid="InputInstructions"] {
+    display: none;
+}
 </style>
 """
 st.markdown(hide_default_nav, unsafe_allow_html=True)
