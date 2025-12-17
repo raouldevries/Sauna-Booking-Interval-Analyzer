@@ -757,6 +757,7 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
         st.page_link("pages/5_Promotions.py", label="Promotions", icon=":material/sell:")
         st.page_link("pages/6_Capacity.py", label="Capacity Analysis", icon=":material/analytics:")
         st.page_link("pages/7_Marketing.py", label="Marketing", icon=":material/campaign:")
+        st.page_link("pages/8_Chart_Test.py", label="Chart Test", icon=":material/science:")
         st.markdown("---")
 
 # Column mapping section
@@ -886,7 +887,31 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
 
         merged_clean['interval_category'] = merged_clean['interval_days'].apply(categorize_interval)
 
+        # Pre-compute booking hour and day of week for heatmap (performance optimization)
+        merged_clean['booking_hour'] = merged_clean['booking_date'].dt.hour
+        merged_clean['booking_dow'] = merged_clean['booking_date'].dt.day_name()
+
         return merged_clean, unmatched_count, invalid_count, negative_count
+
+    @st.cache_data
+    def compute_heatmap_data(booking_hours, booking_dows):
+        """Cached computation of heatmap pivot table and metrics."""
+        day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+
+        # Create DataFrame for groupby
+        df = pd.DataFrame({'booking_hour': booking_hours, 'booking_dow': booking_dows})
+        df['booking_dow'] = pd.Categorical(df['booking_dow'], categories=day_order, ordered=True)
+
+        # Create pivot table
+        heatmap_pivot = df.groupby(['booking_hour', 'booking_dow']).size().unstack(fill_value=0)
+        heatmap_pivot = heatmap_pivot.reindex(columns=day_order, fill_value=0)
+
+        # Calculate metrics
+        peak_hour = int(df['booking_hour'].mode().iloc[0]) if len(df) > 0 else 0
+        peak_day = str(df['booking_dow'].mode().iloc[0]) if len(df) > 0 else 'Unknown'
+        evening_pct = (df['booking_hour'] >= 18).sum() / len(df) * 100 if len(df) > 0 else 0
+
+        return heatmap_pivot, peak_hour, peak_day, evening_pct
 
     # Temperature analysis functions
     @st.cache_data
@@ -1178,6 +1203,72 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
                     'Median Lead Time (days)': st.column_config.NumberColumn('Median Lead Time (days)', help='Typical days between booking and visit (ignoring outliers)'),
                 }
                 st.dataframe(location_stats, use_container_width=True, column_config=location_stats_config)
+
+                # Booking Decision Heatmap
+                st.markdown("#### When Do Customers Book?")
+                st.markdown("This heatmap shows when customers make their booking decisions (hour of day vs day of week).")
+
+                # Location filter for heatmap
+                heatmap_locations = ['All Locations'] + sorted(filtered_data['location'].dropna().unique().tolist())
+                selected_heatmap_location = st.selectbox(
+                    "Select Location",
+                    options=heatmap_locations,
+                    index=0,
+                    key="booking_heatmap_location_filter"
+                )
+
+                # Filter data based on location selection (use pre-computed columns)
+                if selected_heatmap_location == 'All Locations':
+                    heatmap_hours = filtered_data['booking_hour'].tolist()
+                    heatmap_dows = filtered_data['booking_dow'].tolist()
+                else:
+                    loc_mask = filtered_data['location'] == selected_heatmap_location
+                    heatmap_hours = filtered_data.loc[loc_mask, 'booking_hour'].tolist()
+                    heatmap_dows = filtered_data.loc[loc_mask, 'booking_dow'].tolist()
+
+                # Use cached function for heatmap computation
+                if len(heatmap_hours) > 0:
+                    heatmap_pivot, peak_hour, peak_day, evening_pct = compute_heatmap_data(
+                        tuple(heatmap_hours), tuple(heatmap_dows)
+                    )
+
+                    fig_heatmap = px.imshow(
+                        heatmap_pivot,
+                        labels=dict(x='Day of Week', y='Hour of Day', color='Bookings'),
+                        aspect='auto',
+                        color_continuous_scale='YlOrRd'
+                    )
+                    fig_heatmap.update_yaxes(tickvals=list(range(0, 24, 2)))
+                    st.plotly_chart(fig_heatmap, use_container_width=True)
+
+                    # Peak booking metrics
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Peak Booking Hour", f"{peak_hour}:00")
+                    with col2:
+                        st.metric("Peak Booking Day", peak_day)
+                    with col3:
+                        st.metric("Evening Bookings (after 18:00)", f"{evening_pct:.1f}%")
+
+                    with st.expander("Marketing Insight: How to use this data", expanded=False):
+                        st.markdown("""
+                        **This heatmap reveals when customers actually make booking decisions**, which directly impacts how you should schedule and allocate marketing spend.
+
+                        | Booking Pattern | Marketing Action |
+                        |-----------------|------------------|
+                        | **Peak booking hours** | Increase ad bids during these hours, ensure ads are running |
+                        | **Peak booking days** | Allocate more daily budget to these days |
+                        | **Low activity periods** | Reduce ad spend, avoid wasting budget |
+                        | **High evening bookings** | Schedule Meta/Google ads for evening delivery |
+
+                        **Practical Applications:**
+                        - **Google Ads**: Use ad scheduling to increase bids +20-30% during peak booking hours
+                        - **Meta Ads**: Set dayparting to prioritize delivery when customers are actively booking
+                        - **Email campaigns**: Send marketing emails to arrive 1-2 hours before peak booking times
+                        - **Customer support**: Staff live chat during high-booking periods to capture conversions
+
+                        **Example:** If peak booking is Sunday at 20:00 with 45% evening bookings → Schedule ads heavily for Sunday evenings, reduce weekday morning spend, and optimize checkout for mobile (evening = phone users).
+                        """)
 
             # Temperature Analysis
             if show_temperature:

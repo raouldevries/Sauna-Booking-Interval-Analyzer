@@ -52,6 +52,7 @@ st.sidebar.page_link("pages/4_Revenue.py", label="Revenue & Value", icon=":mater
 st.sidebar.page_link("pages/5_Promotions.py", label="Promotions", icon=":material/local_offer:")
 st.sidebar.page_link("pages/6_Capacity.py", label="Capacity Analysis", icon=":material/analytics:")
 st.sidebar.page_link("pages/7_Marketing.py", label="Marketing", icon=":material/campaign:")
+st.sidebar.page_link("pages/8_Chart_Test.py", label="Chart Test", icon=":material/science:")
 
 st.markdown("---")
 
