@@ -6,7 +6,6 @@ Test page for evaluating new chart visualizations
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import numpy as np
 import sys
 sys.path.insert(0, '..')
@@ -62,8 +61,6 @@ st.markdown("---")
 # Check if data is loaded
 df1 = st.session_state.get('df1')
 df2 = st.session_state.get('df2')
-google_ads_df = st.session_state.get('google_ads_df')
-meta_ads_df = st.session_state.get('meta_ads_df')
 
 if df1 is None or df2 is None:
     st.warning("Please load booking data to view charts.")
@@ -227,75 +224,6 @@ def compute_participants_metrics(participants_series, revenues=None):
 
     return stats, df, category_stats, revenue_by_size
 
-
-@st.cache_data
-def compute_marketing_metrics(google_ads_json, meta_ads_json, booking_dates, revenues):
-    """Cached computation of marketing spend vs bookings metrics."""
-    # Parse marketing data
-    dfs_to_combine = []
-    if google_ads_json:
-        dfs_to_combine.append(pd.read_json(google_ads_json))
-    if meta_ads_json:
-        dfs_to_combine.append(pd.read_json(meta_ads_json))
-
-    if not dfs_to_combine:
-        return None
-
-    combined = pd.concat(dfs_to_combine, ignore_index=True)
-
-    # Apply filters
-    if 'spend' in combined.columns:
-        combined = combined[combined['spend'] > 0]
-    if 'campaign_name' in combined.columns:
-        combined = combined[combined['campaign_name'].notna()]
-        combined = combined[combined['campaign_name'].astype(str).str.strip() != '']
-        combined = combined[~combined['campaign_name'].astype(str).str.strip().str.match(r'^-+$')]
-
-    total_spend = combined['spend'].sum() if 'spend' in combined.columns else 0
-
-    # Get marketing date range
-    marketing_min_date = None
-    marketing_max_date = None
-    if 'Reporting starts' in combined.columns and 'Reporting ends' in combined.columns:
-        start_dates = pd.to_datetime(combined['Reporting starts'], errors='coerce')
-        end_dates = pd.to_datetime(combined['Reporting ends'], errors='coerce')
-        if start_dates.notna().any():
-            marketing_min_date = start_dates.min()
-        if end_dates.notna().any():
-            marketing_max_date = end_dates.max()
-
-    # Calculate daily bookings
-    df = pd.DataFrame({
-        'booking_date': pd.to_datetime(booking_dates),
-        'revenue': revenues
-    })
-    df['date'] = df['booking_date'].dt.date
-    daily = df.groupby('date').agg(
-        bookings=('date', 'count'),
-        revenue=('revenue', 'sum')
-    ).reset_index()
-    daily['date'] = pd.to_datetime(daily['date'])
-
-    # Marketing period
-    if marketing_min_date is not None and marketing_max_date is not None:
-        marketing_days = (marketing_max_date - marketing_min_date).days + 1
-    else:
-        marketing_days = (daily['date'].max() - daily['date'].min()).days + 1
-
-    daily_spend = total_spend / marketing_days if marketing_days > 0 else 0
-
-    # Rolling averages
-    daily['bookings_7d_avg'] = daily['bookings'].rolling(window=7, min_periods=1).mean()
-    daily['revenue_7d_avg'] = daily['revenue'].rolling(window=7, min_periods=1).mean()
-
-    return {
-        'total_spend': total_spend,
-        'daily_spend': daily_spend,
-        'marketing_days': marketing_days,
-        'marketing_min_date': marketing_min_date,
-        'marketing_max_date': marketing_max_date,
-        'daily_bookings': daily
-    }
 
 # Prepare data
 try:
@@ -608,134 +536,6 @@ else:
 
 st.markdown("---")
 
-# ============== CHART 4: SPEND VS BOOKINGS TIMELINE ==============
-st.markdown("## 4. Marketing Spend vs Bookings Timeline")
-st.markdown("**Question:** Does increased marketing spend lead to more bookings? What's the correlation?")
-
-# Check if marketing data is available
-has_marketing_data = (google_ads_df is not None and len(google_ads_df) > 0) or (meta_ads_df is not None and len(meta_ads_df) > 0)
-
-if has_marketing_data and 'booking_date' in merged_data.columns:
-    # Use cached computation for marketing metrics
-    google_json = google_ads_df.to_json() if google_ads_df is not None else None
-    meta_json = meta_ads_df.to_json() if meta_ads_df is not None else None
-
-    marketing_metrics = compute_marketing_metrics(
-        google_json,
-        meta_json,
-        merged_data['booking_date'].tolist(),
-        merged_data['Total gross'].tolist() if 'Total gross' in merged_data.columns else [0] * len(merged_data)
-    )
-
-    if marketing_metrics is not None:
-        total_spend = marketing_metrics['total_spend']
-        daily_spend_estimate = marketing_metrics['daily_spend']
-        marketing_days = marketing_metrics['marketing_days']
-        marketing_min_date = marketing_metrics['marketing_min_date']
-        marketing_max_date = marketing_metrics['marketing_max_date']
-        daily_bookings = marketing_metrics['daily_bookings']
-
-        total_bookings = daily_bookings['bookings'].sum()
-        total_revenue = daily_bookings['revenue'].sum()
-
-        # Key metrics
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Total Marketing Spend", f"€{total_spend:,.0f}")
-        with col2:
-            st.metric("Total Bookings", f"{total_bookings:,}")
-        with col3:
-            cpa = total_spend / total_bookings if total_bookings > 0 else 0
-            st.metric("Avg CPA", f"€{cpa:.2f}")
-        with col4:
-            roas = total_revenue / total_spend if total_spend > 0 else 0
-            st.metric("ROAS", f"{roas:.1f}x")
-
-        # Create dual-axis chart
-        fig4 = go.Figure()
-
-        # Add bookings line (primary y-axis)
-        fig4.add_trace(go.Scatter(
-            x=daily_bookings['date'],
-            y=daily_bookings['bookings_7d_avg'],
-            name='Bookings (7-day avg)',
-            line=dict(color='#2ecc71', width=2),
-            yaxis='y'
-        ))
-
-        # Add revenue line (secondary y-axis)
-        fig4.add_trace(go.Scatter(
-            x=daily_bookings['date'],
-            y=daily_bookings['revenue_7d_avg'],
-            name='Revenue (7-day avg)',
-            line=dict(color='#3498db', width=2, dash='dot'),
-            yaxis='y2'
-        ))
-
-        # Add daily spend reference line
-        fig4.add_hline(
-            y=daily_spend_estimate,
-            line_dash="dash",
-            line_color="red",
-            annotation_text=f"Avg Daily Spend: €{daily_spend_estimate:.0f}",
-            annotation_position="top right"
-        )
-
-        # Update layout for dual axis
-        fig4.update_layout(
-            title='Daily Bookings & Revenue Over Time',
-            xaxis=dict(
-                title='Date',
-                tickformat='%d %b %Y',
-                dtick='M1',
-                tickangle=-45
-            ),
-            yaxis=dict(title='Bookings (7-day avg)', side='left', showgrid=False),
-            yaxis2=dict(title='Revenue (7-day avg)', side='right', overlaying='y', showgrid=False),
-            hovermode='x unified',
-            height=450,
-            legend=dict(orientation='h', yanchor='bottom', y=1.02)
-        )
-
-        st.plotly_chart(fig4, use_container_width=True)
-
-        # Correlation analysis
-        if len(daily_bookings) > 7:
-            daily_bookings_copy = daily_bookings.copy()
-            daily_bookings_copy['week'] = daily_bookings_copy['date'].dt.isocalendar().week
-            daily_bookings_copy['year'] = daily_bookings_copy['date'].dt.year
-            weekly_data = daily_bookings_copy.groupby(['year', 'week']).agg({
-                'bookings': 'sum',
-                'revenue': 'sum'
-            }).reset_index()
-
-            correlation = weekly_data['bookings'].corr(weekly_data['revenue'])
-
-            # Format marketing period for display
-            if marketing_min_date is not None and marketing_max_date is not None:
-                marketing_period_str = f"{marketing_min_date.strftime('%Y-%m-%d')} to {marketing_max_date.strftime('%Y-%m-%d')} ({marketing_days} days)"
-            else:
-                marketing_period_str = "Unknown (using booking data range)"
-
-            st.markdown(f"""
-            **Analysis:**
-            - **Booking-Revenue Correlation:** {correlation:.2f} ({"Strong" if abs(correlation) > 0.7 else "Moderate" if abs(correlation) > 0.4 else "Weak"})
-            - **Average Daily Bookings:** {daily_bookings['bookings'].mean():.1f}
-            - **Marketing Period:** {marketing_period_str}
-            - **Booking Data Range:** {daily_bookings['date'].min().strftime('%Y-%m-%d')} to {daily_bookings['date'].max().strftime('%Y-%m-%d')}
-            """)
-
-        st.markdown("**Insight:** Track how marketing spend correlates with booking volume over time. Look for lag effects - bookings may increase days after spend increases.")
-    else:
-        st.info("Unable to compute marketing metrics.")
-else:
-    if not has_marketing_data:
-        st.info("Marketing data not loaded. Load Google Ads or Meta Ads data on the Marketing page to see this chart.")
-    else:
-        st.info("Booking date data not available.")
-
-st.markdown("---")
-
 # ============== SUMMARY ==============
 st.markdown("## Summary: Chart Recommendations")
 
@@ -745,5 +545,4 @@ st.markdown("""
 | 1 | Revenue per Participant | Pricing efficiency by location | Revenue & Value |
 | 2 | Private Event Analysis | Private event value comparison | Revenue & Value |
 | 3 | Participants per Booking | Group size distribution | Capacity Analysis |
-| 4 | Spend vs Bookings Timeline | Marketing-booking correlation | Marketing |
 """)
