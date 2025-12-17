@@ -179,6 +179,6 @@ def get_available_locations(df, location_col=None):
     if location_col is None or location_col not in df.columns:
         return []
 
-    # Filter out NaN values and sort
+    # Filter out NaN values, non-location entries (UTM test, etc.), and sort
     locations = df[location_col].dropna().unique().tolist()
-    return sorted([loc for loc in locations if pd.notna(loc)])
+    return sorted([loc for loc in locations if pd.notna(loc) and str(loc).lower().startswith('kuuma')])

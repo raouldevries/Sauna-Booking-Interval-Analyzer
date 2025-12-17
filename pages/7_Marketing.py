@@ -499,6 +499,390 @@ def location_marketing_summary(attribution_df, bookings_df, location_col='Tour',
     return result_df.sort_values('marketing_spend', ascending=False)
 
 
+def _match_campaign_to_location(campaign_name):
+    """Helper to match a campaign name to a single location. Returns (location, is_excluded)."""
+    if pd.isna(campaign_name) or not isinstance(campaign_name, str):
+        return None, True
+
+    name_lower = campaign_name.lower()
+
+    # Check if "alle locaties" campaign
+    if 'alle locaties' in name_lower or 'all locations' in name_lower:
+        return None, True
+
+    # Find matching locations
+    matched_locations = campaign_matches_all_locations(campaign_name)
+
+    if len(matched_locations) == 1:
+        return matched_locations[0], False
+    else:
+        # Multi-location or no match - exclude
+        return None, True
+
+
+@st.cache_data(show_spinner=False)
+def get_marketing_by_location(_df_hash, df_json):
+    """
+    Aggregate marketing metrics by location from campaign data.
+    Only includes campaigns that target a SINGLE specific location.
+    Excludes "alle locaties" and multi-location campaigns.
+
+    Uses caching for performance. Pass hash of df as _df_hash for cache key.
+
+    Returns: DataFrame with location, spend, conversions, conversion_value, excluded_spend
+    """
+    campaigns_df = pd.read_json(StringIO(df_json))
+
+    if campaigns_df is None or len(campaigns_df) == 0:
+        return None, 0
+
+    # Single apply call - get both location and is_excluded in one pass
+    match_results = campaigns_df['campaign_name'].apply(_match_campaign_to_location)
+    campaigns_df['_matched_loc'] = match_results.apply(lambda x: x[0])
+    campaigns_df['_is_excluded'] = match_results.apply(lambda x: x[1])
+
+    # Calculate excluded spend
+    excluded_spend = campaigns_df.loc[campaigns_df['_is_excluded'], 'spend'].sum()
+
+    # Filter to only matched campaigns
+    matched_df = campaigns_df[campaigns_df['_matched_loc'].notna()].copy()
+
+    if len(matched_df) == 0:
+        return None, excluded_spend
+
+    # Vectorized aggregation by location
+    result_df = matched_df.groupby('_matched_loc').agg({
+        'spend': 'sum',
+        'clicks': 'sum',
+        'conversions': 'sum',
+        'conversion_value': 'sum',
+        'campaign_name': 'count'
+    }).reset_index()
+
+    result_df.columns = ['location', 'ad_spend', 'clicks', 'conversions', 'conversion_value', 'campaigns']
+
+    # Calculate CPA
+    result_df['cpa'] = (result_df['ad_spend'] /
+                        result_df['conversions'].replace(0, float('nan'))).fillna(0)
+
+    return result_df, excluded_spend
+
+
+def _build_location_matcher():
+    """Pre-build a mapping from booking location patterns to marketing locations."""
+    # Build reverse mapping: booking_loc_lower -> marketing_loc
+    exact_matches = {}
+    for marketing_loc, booking_locs in LOCATION_NAME_MAP.items():
+        for booking_loc in booking_locs:
+            exact_matches[booking_loc.lower()] = marketing_loc
+    return exact_matches
+
+
+# Pre-build location matcher once
+_LOCATION_EXACT_MATCHES = _build_location_matcher()
+
+
+def _map_booking_to_marketing_loc(booking_loc_lower):
+    """Map a booking location to marketing location name."""
+    if pd.isna(booking_loc_lower):
+        return None
+
+    # Try exact match first
+    if booking_loc_lower in _LOCATION_EXACT_MATCHES:
+        return _LOCATION_EXACT_MATCHES[booking_loc_lower]
+
+    # Try keyword matching
+    for marketing_loc, booking_locs in LOCATION_NAME_MAP.items():
+        loc_keywords = marketing_loc.lower().replace('amsterdam ', '').split()
+        for keyword in loc_keywords:
+            if len(keyword) > 3 and keyword in booking_loc_lower:
+                return marketing_loc
+
+    return None
+
+
+@st.cache_data(show_spinner=False)
+def _get_revenue_by_location_cached(_cache_key, locations_json, revenues_json, start_date_str, end_date_str):
+    """
+    Cached revenue by location calculation.
+    """
+    locations = pd.read_json(StringIO(locations_json), typ='series')
+    revenues = pd.read_json(StringIO(revenues_json), typ='series')
+
+    start_date = pd.to_datetime(start_date_str)
+    end_date = pd.to_datetime(end_date_str)
+
+    # Build DataFrame
+    df = pd.DataFrame({'location': locations, 'revenue': revenues})
+
+    # Vectorized location mapping using .map() with pre-built dict
+    df['_location_lower'] = df['location'].astype(str).str.lower()
+    df['_marketing_loc'] = df['_location_lower'].map(_LOCATION_EXACT_MATCHES)
+
+    # For unmatched, try keyword matching (only for those not in exact matches)
+    unmatched_mask = df['_marketing_loc'].isna()
+    if unmatched_mask.any():
+        df.loc[unmatched_mask, '_marketing_loc'] = df.loc[unmatched_mask, '_location_lower'].apply(_map_booking_to_marketing_loc)
+
+    # Filter to matched locations only
+    matched_df = df[df['_marketing_loc'].notna()]
+
+    if len(matched_df) == 0:
+        return {loc: {'revenue': 0, 'bookings': 0} for loc in LOCATION_NAME_MAP.keys()}
+
+    # Vectorized aggregation
+    agg_df = matched_df.groupby('_marketing_loc').agg({
+        'revenue': 'sum',
+        '_marketing_loc': 'count'
+    })
+    agg_df.columns = ['revenue', 'bookings']
+
+    # Convert to dict and fill missing locations with zeros
+    result = agg_df.to_dict('index')
+    for loc in LOCATION_NAME_MAP.keys():
+        if loc not in result:
+            result[loc] = {'revenue': 0, 'bookings': 0}
+
+    return result
+
+
+def get_revenue_by_location_filtered(df1, start_date, end_date, location_col='Location', date_col='Created', revenue_col='Total gross'):
+    """
+    Get revenue and bookings per location filtered by date range. Uses caching.
+
+    Returns: dict of {marketing_location: {'revenue': X, 'bookings': Y}}
+    """
+    if df1 is None or len(df1) == 0:
+        return {}
+
+    # Detect location column
+    if location_col not in df1.columns:
+        for col in ['Location', 'Tour', 'Activity']:
+            if col in df1.columns:
+                location_col = col
+                break
+        else:
+            return {}
+
+    # Filter by date range first (before caching prep)
+    df1_copy = df1.copy()
+    df1_copy['_date'] = pd.to_datetime(df1_copy[date_col], errors='coerce')
+    date_mask = (df1_copy['_date'] >= start_date) & (df1_copy['_date'] <= end_date)
+    df = df1_copy.loc[date_mask]
+
+    if len(df) == 0:
+        return {}
+
+    # Prepare data for cached function
+    locations = df[location_col]
+    revenues = pd.to_numeric(df[revenue_col], errors='coerce').fillna(0) if revenue_col in df.columns else pd.Series([0] * len(df))
+
+    # Create cache key
+    cache_key = hash((len(df), round(revenues.sum(), 2), str(start_date), str(end_date)))
+
+    return _get_revenue_by_location_cached(
+        cache_key,
+        locations.to_json(),
+        revenues.to_json(),
+        str(start_date),
+        str(end_date)
+    )
+
+
+def create_marketing_roi_table(marketing_df, revenue_data):
+    """
+    Combine marketing metrics with revenue data into a single table.
+
+    Returns: DataFrame with location, revenue, bookings, clicks, conversions, conv_rate, conversion_value, ad_spend, cpa, roas
+    """
+    if marketing_df is None or len(marketing_df) == 0:
+        return None
+
+    # Convert revenue_data dict to DataFrame for vectorized merge
+    rev_df = pd.DataFrame([
+        {'location': loc, 'revenue': data['revenue'], 'bookings': data['bookings']}
+        for loc, data in revenue_data.items()
+    ])
+
+    # Merge marketing data with revenue data (vectorized)
+    result = marketing_df.merge(rev_df, on='location', how='left')
+    result['revenue'] = result['revenue'].fillna(0)
+    result['bookings'] = result['bookings'].fillna(0)
+
+    # Vectorized calculations
+    result['ROAS'] = (result['conversion_value'] / result['ad_spend'].replace(0, float('nan'))).fillna(0)
+    result['Conv. Rate %'] = (result['conversions'] / result['clicks'].replace(0, float('nan')) * 100).fillna(0)
+
+    # Rename and select columns
+    result = result.rename(columns={
+        'location': 'Location',
+        'revenue': 'Revenue',
+        'bookings': 'Bookings',
+        'clicks': 'Clicks',
+        'conversions': 'Conversions',
+        'conversion_value': 'Conv. Value',
+        'ad_spend': 'Ad Spend',
+        'cpa': 'CPA'
+    })
+
+    # Select and order columns
+    columns = ['Location', 'Revenue', 'Bookings', 'Clicks', 'Conversions', 'Conv. Rate %', 'Conv. Value', 'Ad Spend', 'CPA', 'ROAS']
+    result = result[columns].sort_values('Ad Spend', ascending=False)
+
+    return result
+
+
+@st.cache_data(show_spinner=False)
+def _calculate_cpa_metrics_cached(_df_hash, total_revenue, total_bookings, date_min_str, date_max_str,
+                                   email_data_json, date_col, revenue_col):
+    """
+    Cached CPA metrics calculation. Called by calculate_cpa_metrics().
+    """
+    aov = total_revenue / total_bookings if total_bookings > 0 else 0
+
+    # Calculate data span
+    if date_min_str and date_max_str:
+        min_date = pd.to_datetime(date_min_str)
+        max_date = pd.to_datetime(date_max_str)
+        data_span_days = (max_date - min_date).days
+        data_span_months = data_span_days / 30.44
+    else:
+        data_span_months = 0
+
+    # Calculate retention rate
+    retention_rate = None
+    cohort_size = 0
+    returning_customers = 0
+
+    if email_data_json and data_span_months >= 2:
+        try:
+            customer_data = pd.read_json(StringIO(email_data_json))
+            customer_data['booking_date'] = pd.to_datetime(customer_data['booking_date'], errors='coerce')
+            customer_data = customer_data.dropna(subset=['booking_date', 'email'])
+
+            if len(customer_data) > 0:
+                min_date = customer_data['booking_date'].min()
+                first_month_start = (min_date + pd.offsets.MonthBegin(1)).normalize()
+                first_month_end = (first_month_start + pd.offsets.MonthEnd(0)).normalize()
+
+                first_booking_dates = customer_data.groupby('email')['booking_date'].min().reset_index()
+                first_booking_dates.columns = ['email', 'first_booking']
+
+                cohort_customers = first_booking_dates[
+                    (first_booking_dates['first_booking'] >= first_month_start) &
+                    (first_booking_dates['first_booking'] <= first_month_end)
+                ]['email'].tolist()
+
+                cohort_size = len(cohort_customers)
+
+                if cohort_size > 0:
+                    two_months_later = first_month_end + pd.DateOffset(months=2)
+                    cohort_set = set(cohort_customers)
+
+                    customer_data_ranked = customer_data.copy()
+                    customer_data_ranked['booking_rank'] = customer_data_ranked.groupby('email')['booking_date'].rank(method='first')
+
+                    second_bookings = customer_data_ranked[
+                        (customer_data_ranked['email'].isin(cohort_set)) &
+                        (customer_data_ranked['booking_rank'] == 2)
+                    ]
+
+                    returning_customers = (second_bookings['booking_date'] <= two_months_later).sum()
+                    retention_rate = returning_customers / cohort_size
+        except Exception:
+            retention_rate = None
+
+    return {
+        'aov': aov,
+        'retention_rate': retention_rate,
+        'data_span_months': data_span_months,
+        'has_sufficient_data': data_span_months >= 2,
+        'total_bookings': total_bookings,
+        'total_revenue': total_revenue,
+        'cohort_size': cohort_size,
+        'returning_customers': returning_customers
+    }
+
+
+def calculate_cpa_metrics(df1, df2=None, date_col='Created', revenue_col='Total gross', email_col='Email address'):
+    """
+    Calculate CPA-related metrics from booking data. Uses caching for performance.
+    """
+    if df1 is None or len(df1) == 0:
+        return None
+
+    if revenue_col not in df1.columns:
+        return None
+
+    # Pre-calculate hashable values
+    total_revenue = pd.to_numeric(df1[revenue_col], errors='coerce').fillna(0).sum()
+    total_bookings = len(df1)
+
+    # Get date range
+    date_min_str = None
+    date_max_str = None
+    if date_col in df1.columns:
+        dates = pd.to_datetime(df1[date_col], errors='coerce')
+        date_min_str = str(dates.min())
+        date_max_str = str(dates.max())
+
+    # Prepare email data for retention calculation
+    email_data_json = None
+    if email_col in df1.columns and date_col in df1.columns:
+        email_data = df1[[email_col, date_col]].copy()
+        email_data.columns = ['email', 'booking_date']
+        email_data_json = email_data.to_json(date_format='iso')
+
+    # Create hash for cache key
+    df_hash = hash((total_bookings, round(total_revenue, 2), date_min_str, date_max_str))
+
+    return _calculate_cpa_metrics_cached(
+        df_hash, total_revenue, total_bookings, date_min_str, date_max_str,
+        email_data_json, date_col, revenue_col
+    )
+
+
+def calculate_cpa_targets(aov, bedrijfskosten_pct, winstmarge_pct, retention_rate=None):
+    """
+    Calculate break-even and target CPA values.
+
+    Args:
+        aov: Average Order Value
+        bedrijfskosten_pct: Operating costs percentage (0-100)
+        winstmarge_pct: Target profit margin percentage (0-100)
+        retention_rate: Optional retention rate for LTV calculations
+
+    Returns dict with per-booking and LTV-based CPA targets
+    """
+    bedrijfskosten = bedrijfskosten_pct / 100
+    winstmarge = winstmarge_pct / 100
+
+    # Per-booking calculations
+    breakeven_cpa = aov * (1 - bedrijfskosten)
+    target_cpa = breakeven_cpa * (1 - winstmarge)
+
+    result = {
+        'breakeven_cpa': breakeven_cpa,
+        'target_cpa': target_cpa,
+    }
+
+    # LTV-based calculations (only if retention rate available)
+    if retention_rate is not None and retention_rate > 0 and retention_rate < 1:
+        expected_bookings = 1 / (1 - retention_rate)
+        ltv = aov * expected_bookings
+        breakeven_cpa_ltv = ltv * (1 - bedrijfskosten)
+        target_cpa_ltv = breakeven_cpa_ltv * (1 - winstmarge)
+
+        result.update({
+            'expected_bookings': expected_bookings,
+            'ltv': ltv,
+            'breakeven_cpa_ltv': breakeven_cpa_ltv,
+            'target_cpa_ltv': target_cpa_ltv,
+        })
+
+    return result
+
+
 @st.cache_data(show_spinner=False)
 def calculate_marketing_metrics(_df_hash, df_json):
     """Calculate all marketing metrics with caching. Uses df_hash for cache key."""
@@ -1565,6 +1949,461 @@ else:
                 for campaign in campaigns:
                     st.session_state.stdc_tags[campaign] = suggest_stdc_phase(campaign)
                 st.rerun()
+
+        # ===== Marketing ROI by Location Section =====
+        st.markdown("---")
+        st.markdown("### Marketing ROI by Location")
+
+        # Platform filter with toggles
+        platform_options = []
+        if 'Platform' in combined_df.columns:
+            platform_options = combined_df['Platform'].unique().tolist()
+
+        selected_platforms = []
+        if len(platform_options) > 1:
+            col1, col2, col3 = st.columns([1, 1, 4])
+            with col1:
+                google_on = st.toggle("Google Ads", value=True, key="roi_google_toggle")
+                if google_on and 'Google Ads' in platform_options:
+                    selected_platforms.append('Google Ads')
+            with col2:
+                meta_on = st.toggle("Meta Ads", value=False, key="roi_meta_toggle")
+                if meta_on and 'Meta Ads' in platform_options:
+                    selected_platforms.append('Meta Ads')
+            # Filter combined_df for this section
+            roi_filtered_df = combined_df[combined_df['Platform'].isin(selected_platforms)]
+        else:
+            roi_filtered_df = combined_df
+            selected_platforms = platform_options
+
+        # Check if we have booking data
+        if st.session_state.df1 is None:
+            st.info("Upload booking data to see revenue by location alongside marketing metrics.")
+        elif len(selected_platforms) == 0:
+            st.warning("Please select at least one platform.")
+        else:
+            # Get marketing metrics by location (with caching)
+            roi_df_hash = hash(roi_filtered_df.to_json())
+            roi_df_json = roi_filtered_df.to_json()
+            marketing_by_loc, excluded_spend = get_marketing_by_location(roi_df_hash, roi_df_json)
+
+            if marketing_by_loc is None or len(marketing_by_loc) == 0:
+                st.warning("No campaigns could be attributed to specific locations. Campaigns must mention a single location in their name.")
+            else:
+                # Get date range from marketing data
+                if 'report_start' in combined_df.columns and combined_df['report_start'].notna().any():
+                    min_date = combined_df['report_start'].min()
+                    max_date = combined_df['report_end'].max() if 'report_end' in combined_df.columns else min_date
+                else:
+                    # Fallback: use booking data date range
+                    date_col = 'Created' if 'Created' in st.session_state.df1.columns else 'Date'
+                    if date_col in st.session_state.df1.columns:
+                        dates = pd.to_datetime(st.session_state.df1[date_col], errors='coerce')
+                        min_date = dates.min()
+                        max_date = dates.max()
+                    else:
+                        min_date = None
+                        max_date = None
+
+                # Get revenue by location for the same date range
+                if min_date is not None and max_date is not None:
+                    # Detect columns
+                    location_col = 'Location' if 'Location' in st.session_state.df1.columns else 'Tour' if 'Tour' in st.session_state.df1.columns else 'Activity'
+                    date_col = 'Created' if 'Created' in st.session_state.df1.columns else 'Date'
+                    revenue_col = 'Total gross' if 'Total gross' in st.session_state.df1.columns else None
+
+                    if revenue_col:
+                        revenue_by_loc = get_revenue_by_location_filtered(
+                            st.session_state.df1, min_date, max_date,
+                            location_col=location_col, date_col=date_col, revenue_col=revenue_col
+                        )
+
+                        # Create combined table
+                        roi_table = create_marketing_roi_table(marketing_by_loc, revenue_by_loc)
+
+                        if roi_table is not None and len(roi_table) > 0:
+                            # Show excluded spend warning
+                            total_spend = roi_filtered_df['spend'].sum()
+                            attributed_spend = roi_table['Ad Spend'].sum()
+                            excluded_pct = (excluded_spend / total_spend * 100) if total_spend > 0 else 0
+
+                            st.info(f"⚠️ **€{excluded_spend:,.0f}** ({excluded_pct:.1f}%) of ad spend is excluded from this table. "
+                                    f"This includes 'alle locaties' campaigns, multi-location campaigns, and campaigns without a clear location target.")
+
+                            # Show date range
+                            st.caption(f"Data period: {pd.to_datetime(min_date).strftime('%d %b %Y')} - {pd.to_datetime(max_date).strftime('%d %b %Y')}")
+
+                            # Key metrics
+                            total_bookings = roi_table['Bookings'].sum()
+                            total_clicks = roi_table['Clicks'].sum()
+                            total_conversions = roi_table['Conversions'].sum()
+                            total_conv_value = roi_table['Conv. Value'].sum()
+                            overall_roas = (total_conv_value / attributed_spend) if attributed_spend > 0 else 0
+                            overall_cpa = attributed_spend / total_conversions if total_conversions > 0 else 0
+                            overall_conv_rate = (total_conversions / total_clicks * 100) if total_clicks > 0 else 0
+
+                            col1, col2, col3, col4, col5, col6 = st.columns(6)
+                            with col1:
+                                st.metric("Ad Spend", f"€{attributed_spend:,.0f}", help="Total ad spend from campaigns targeting specific locations")
+                            with col2:
+                                st.metric("Conv. Value", f"€{total_conv_value:,.0f}", help="Total conversion value reported by ad platforms")
+                            with col3:
+                                st.metric("Bookings", f"{total_bookings:,}", help="Total bookings at these locations during the period")
+                            with col4:
+                                st.metric("Conv. Rate", f"{overall_conv_rate:.1f}%", help="Conversions ÷ Clicks × 100 (% of clicks that converted)")
+                            with col5:
+                                st.metric("Avg CPA", f"€{overall_cpa:,.2f}", help="Cost per Acquisition = Ad Spend ÷ Conversions")
+                            with col6:
+                                st.metric("ROAS", f"{overall_roas:.1f}x", help="Return on Ad Spend = Conv. Value ÷ Ad Spend")
+
+                            # Per-location profit margins
+                            locations = roi_table['Location'].tolist()
+
+                            with st.expander("Profit Margins per Location", expanded=False):
+                                st.caption("Set profit margin for each location to calculate ROAS thresholds. Default: 70%")
+                                margin_cols = st.columns(min(len(locations), 4))
+                                location_margins = {}
+                                for i, loc in enumerate(locations):
+                                    col_idx = i % 4
+                                    with margin_cols[col_idx]:
+                                        # Shorten location name for display
+                                        short_name = loc.replace('Amsterdam ', '').replace('Rotterdam ', '')
+                                        location_margins[loc] = st.number_input(
+                                            short_name,
+                                            min_value=10,
+                                            max_value=95,
+                                            value=70,
+                                            step=5,
+                                            key=f"margin_{loc}",
+                                            help=f"Profit margin % for {loc}"
+                                        )
+
+                            # Format table for display
+                            display_df = roi_table.copy()
+                            display_df['Revenue'] = display_df['Revenue'].round(0).astype(int)
+                            display_df['Bookings'] = display_df['Bookings'].round(0).astype(int)
+                            display_df['Clicks'] = display_df['Clicks'].round(0).astype(int)
+                            display_df['Conversions'] = display_df['Conversions'].round(0).astype(int)
+                            display_df['Conv. Rate %'] = (display_df['Conv. Rate %'] * 10).round() / 10  # Round to 1 decimal
+                            display_df['Conv. Value'] = display_df['Conv. Value'].round(0).astype(int)
+                            display_df['Ad Spend'] = display_df['Ad Spend'].round(0).astype(int)
+                            display_df['CPA'] = (display_df['CPA'] * 100).round() / 100  # Round to 2 decimals
+                            display_df['ROAS'] = (display_df['ROAS'] * 10).round() / 10  # Round to 1 decimal
+
+                            # Calculate ROAS thresholds per location
+                            # Break-even ROAS = 1 / (margin/100) = 100 / margin
+                            def get_roas_thresholds(margin_pct):
+                                margin_decimal = margin_pct / 100
+                                breakeven = 1 / margin_decimal
+                                return breakeven * 1.5, breakeven * 2  # good, excellent
+
+                            # Color code ROAS based on per-location margin thresholds
+                            def style_roas_row(row):
+                                loc = row['Location']
+                                margin = location_margins.get(loc, 70)
+                                good_threshold, excellent_threshold = get_roas_thresholds(margin)
+                                roas_val = row['ROAS']
+
+                                styles = [''] * len(row)
+                                roas_idx = row.index.get_loc('ROAS')
+
+                                if roas_val >= excellent_threshold:
+                                    styles[roas_idx] = 'background-color: #dcfce7; color: #166534'  # Green
+                                elif roas_val >= good_threshold:
+                                    styles[roas_idx] = 'background-color: #fef3c7; color: #92400e'  # Yellow
+                                else:
+                                    styles[roas_idx] = 'background-color: #fecaca; color: #991b1b'  # Red
+                                return styles
+
+                            styled_roi = display_df.style.apply(style_roas_row, axis=1)
+
+                            # Show threshold legend
+                            st.caption("ROAS colors: 🔴 < 1.5× break-even | 🟡 1.5× - 2× break-even | 🟢 > 2× break-even (thresholds vary by location margin)")
+
+                            roi_config = {
+                                'Location': st.column_config.TextColumn('Location'),
+                                'Revenue': st.column_config.NumberColumn('Revenue', format='€%d', help='Total booking revenue for this location'),
+                                'Bookings': st.column_config.NumberColumn('Bookings', help='Number of bookings'),
+                                'Clicks': st.column_config.NumberColumn('Clicks', help='Total ad clicks'),
+                                'Conversions': st.column_config.NumberColumn('Conversions', help='Ad conversions reported'),
+                                'Conv. Rate %': st.column_config.NumberColumn('Conv. Rate %', format='%.1f', help='Conversions / Clicks × 100 (% of clicks that converted)'),
+                                'Conv. Value': st.column_config.NumberColumn('Conv. Value', format='€%d', help='Conversion value from ads'),
+                                'Ad Spend': st.column_config.NumberColumn('Ad Spend', format='€%d', help='Total ad spend for this location'),
+                                'CPA': st.column_config.NumberColumn('CPA', format='€%.2f', help='Cost per Acquisition = Ad Spend / Conversions'),
+                                'ROAS': st.column_config.NumberColumn('ROAS', format='%.1f', help='Conv. Value / Ad Spend (e.g., 5x = €5 conv value per €1 spent)'),
+                            }
+
+                            st.dataframe(styled_roi, use_container_width=True, hide_index=True, column_config=roi_config)
+
+                            # Explanation
+                            with st.expander("How this table works", expanded=False):
+                                st.markdown(f"""
+                                **Data Sources:**
+                                - **Revenue & Bookings**: From your booking data, filtered to the marketing data date range
+                                - **Conversions, Conv. Value, Ad Spend**: From campaigns that target a single specific location
+
+                                **What's Excluded:**
+                                - "Alle locaties" / "All locations" campaigns
+                                - Campaigns targeting multiple locations (e.g., "Amsterdam M, IJ, N & Sloterplas")
+                                - Campaigns without a recognizable location in the name
+
+                                **Metrics:**
+                                - **Conv. Rate %** = Conversions ÷ Clicks × 100 (what % of ad clicks converted)
+                                - **CPA** (Cost per Acquisition) = Ad Spend ÷ Conversions
+                                - **ROAS** (Return on Ad Spend) = Conv. Value ÷ Ad Spend (e.g., 5x = €5 conversion value per €1 spent)
+
+                                **ROAS Color Thresholds (per-location, based on profit margin):**
+                                - Break-even ROAS = 100 ÷ margin% (e.g., 70% margin → 1.43x break-even)
+                                - 🔴 Red: < 1.5× break-even (losing money or marginal)
+                                - 🟡 Yellow: 1.5× - 2× break-even (good return)
+                                - 🟢 Green: > 2× break-even (excellent return)
+
+                                Set margins per location in the "Profit Margins per Location" expander above.
+
+                                **Note:** Revenue includes ALL bookings at each location during the period, not just those from ads.
+                                """)
+                        else:
+                            st.warning("Could not create ROI table. Check that booking data contains revenue information.")
+                    else:
+                        st.warning("Revenue column ('Total gross') not found in booking data.")
+                else:
+                    st.warning("Could not determine date range from marketing data.")
+
+        # ===== CPA Targets Section =====
+        st.markdown("---")
+        st.markdown("### CPA Targets")
+        st.caption("Calculate break-even and target CPA based on your booking data and cost structure.")
+
+        if st.session_state.df1 is None:
+            st.info("Upload booking data to calculate CPA targets.")
+        else:
+            # Detect columns
+            date_col = 'Created' if 'Created' in st.session_state.df1.columns else 'Date'
+            revenue_col = 'Total gross' if 'Total gross' in st.session_state.df1.columns else None
+            email_col = 'Email address' if 'Email address' in st.session_state.df1.columns else None
+
+            if revenue_col is None:
+                st.warning("Revenue column ('Total gross') not found in booking data.")
+            else:
+                # Calculate metrics from booking data
+                cpa_metrics = calculate_cpa_metrics(
+                    st.session_state.df1,
+                    date_col=date_col,
+                    revenue_col=revenue_col,
+                    email_col=email_col if email_col else 'Email address'
+                )
+
+                if cpa_metrics is None:
+                    st.warning("Could not calculate CPA metrics from booking data.")
+                else:
+                    # Platform toggles and user inputs
+                    col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
+                    with col1:
+                        cpa_google_on = st.toggle("Google Ads", value=True, key="cpa_google_toggle")
+                    with col2:
+                        cpa_meta_on = st.toggle("Meta Ads", value=True, key="cpa_meta_toggle")
+                    with col3:
+                        bedrijfskosten = st.number_input(
+                            "Bedrijfskosten %",
+                            min_value=0,
+                            max_value=100,
+                            value=70,
+                            step=5,
+                            key="cpa_bedrijfskosten",
+                            help="Operating costs as percentage of revenue (e.g., 70% means €0.70 of each €1 goes to costs)"
+                        )
+                    with col4:
+                        winstmarge = st.number_input(
+                            "Winstmarge %",
+                            min_value=0,
+                            max_value=100,
+                            value=30,
+                            step=5,
+                            key="cpa_winstmarge",
+                            help="Target profit margin after all costs (e.g., 30% means you want €0.30 profit per €1 revenue after costs)"
+                        )
+
+                    # Build platform filter
+                    cpa_selected_platforms = []
+                    if cpa_google_on:
+                        cpa_selected_platforms.append('Google Ads')
+                    if cpa_meta_on:
+                        cpa_selected_platforms.append('Meta Ads')
+
+                    if len(cpa_selected_platforms) == 0:
+                        st.warning("Please select at least one platform to calculate Actual CPA.")
+
+                    # Calculate CPA targets
+                    cpa_targets = calculate_cpa_targets(
+                        cpa_metrics['aov'],
+                        bedrijfskosten,
+                        winstmarge,
+                        cpa_metrics['retention_rate']
+                    )
+
+                    # Get actual CPA from marketing data if available
+                    # Exclude SEE and THINK campaigns (awareness/consideration - not measured on CPA)
+                    actual_cpa = None
+                    excluded_phases = ['SEE', 'THINK']
+                    if 'combined_df' in dir() and combined_df is not None and len(combined_df) > 0:
+                        # Filter by selected platforms
+                        cpa_df = combined_df.copy()
+                        if 'Platform' in cpa_df.columns and len(cpa_selected_platforms) > 0:
+                            cpa_df = cpa_df[cpa_df['Platform'].isin(cpa_selected_platforms)]
+                        # Filter to DO and CARE campaigns only
+                        if 'stdc_phase' in cpa_df.columns:
+                            cpa_df = cpa_df[~cpa_df['stdc_phase'].isin(excluded_phases)]
+                        total_spend = cpa_df['spend'].sum()
+                        total_conversions = cpa_df['conversions'].sum()
+                        if total_conversions > 0:
+                            actual_cpa = total_spend / total_conversions
+
+                    # Build metrics table
+                    st.markdown("#### Per-Booking CPA")
+
+                    # Per-booking metrics
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric(
+                            "AOV",
+                            f"€{cpa_metrics['aov']:.2f}",
+                            help="Average Order Value = Total Revenue ÷ Total Bookings"
+                        )
+                    with col2:
+                        st.metric(
+                            "Break-even CPA",
+                            f"€{cpa_targets['breakeven_cpa']:.2f}",
+                            help=f"Maximum CPA to avoid loss = AOV × (1 - Bedrijfskosten%) = €{cpa_metrics['aov']:.2f} × {(100-bedrijfskosten)/100:.2f}"
+                        )
+                    with col3:
+                        st.metric(
+                            "Target CPA",
+                            f"€{cpa_targets['target_cpa']:.2f}",
+                            help=f"CPA to achieve target profit = Break-even × (1 - Winstmarge%) = €{cpa_targets['breakeven_cpa']:.2f} × {(100-winstmarge)/100:.2f}"
+                        )
+                    with col4:
+                        if actual_cpa is not None:
+                            delta = actual_cpa - cpa_targets['target_cpa']
+                            delta_color = "inverse" if delta > 0 else "normal"
+                            st.metric(
+                                "Actual CPA",
+                                f"€{actual_cpa:.2f}",
+                                delta=f"€{delta:+.2f} vs target",
+                                delta_color=delta_color,
+                                help="Current CPA from DO & CARE campaigns only (excludes SEE & THINK awareness campaigns)"
+                            )
+                        else:
+                            st.metric(
+                                "Actual CPA",
+                                "N/A",
+                                help="Upload marketing data to see actual CPA"
+                            )
+
+                    # LTV-based CPA (only if sufficient data)
+                    if cpa_metrics['has_sufficient_data'] and cpa_metrics['retention_rate'] is not None and 'ltv' in cpa_targets:
+                        st.markdown("#### LTV-Based CPA")
+                        st.caption("Based on customer lifetime value - allows higher CPA for long-term profitability.")
+
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric(
+                                "Retention Rate",
+                                f"{cpa_metrics['retention_rate']:.1%}",
+                                help=f"Percentage of customers who return within 2 months. Based on cohort of {cpa_metrics['cohort_size']} customers."
+                            )
+                        with col2:
+                            st.metric(
+                                "Expected Bookings",
+                                f"{cpa_targets['expected_bookings']:.1f}",
+                                help=f"Expected bookings per customer = 1 ÷ (1 - Retention Rate) = 1 ÷ {1 - cpa_metrics['retention_rate']:.2f}"
+                            )
+                        with col3:
+                            st.metric(
+                                "LTV",
+                                f"€{cpa_targets['ltv']:.2f}",
+                                help=f"Customer Lifetime Value = AOV × Expected Bookings = €{cpa_metrics['aov']:.2f} × {cpa_targets['expected_bookings']:.1f}"
+                            )
+                        with col4:
+                            st.metric(
+                                "Break-even CPA (LTV)",
+                                f"€{cpa_targets['breakeven_cpa_ltv']:.2f}",
+                                help=f"Maximum CPA based on LTV = LTV × (1 - Bedrijfskosten%) = €{cpa_targets['ltv']:.2f} × {(100-bedrijfskosten)/100:.2f}"
+                            )
+
+                        # Target CPA (LTV) with comparison
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric(
+                                "Target CPA (LTV)",
+                                f"€{cpa_targets['target_cpa_ltv']:.2f}",
+                                help=f"Target CPA based on LTV = Break-even (LTV) × (1 - Winstmarge%) = €{cpa_targets['breakeven_cpa_ltv']:.2f} × {(100-winstmarge)/100:.2f}"
+                            )
+                        with col2:
+                            if actual_cpa is not None:
+                                delta_ltv = actual_cpa - cpa_targets['target_cpa_ltv']
+                                delta_color_ltv = "inverse" if delta_ltv > 0 else "normal"
+                                st.metric(
+                                    "Actual vs Target (LTV)",
+                                    f"€{actual_cpa:.2f}",
+                                    delta=f"€{delta_ltv:+.2f}",
+                                    delta_color=delta_color_ltv,
+                                    help="Comparison of actual CPA to LTV-based target"
+                                )
+                    else:
+                        # Show why LTV metrics are hidden
+                        if not cpa_metrics['has_sufficient_data']:
+                            st.info(f"📊 LTV-based CPA requires at least 2 months of data. Current data span: {cpa_metrics['data_span_months']:.1f} months.")
+                        elif cpa_metrics['retention_rate'] is None:
+                            st.info("📊 LTV-based CPA requires customer email data to calculate retention rate.")
+
+                    # Detailed table
+                    with st.expander("View Calculation Details", expanded=False):
+                        table_data = [
+                            {"Metric": "AOV (Average Order Value)", "Value": f"€{cpa_metrics['aov']:.2f}", "Source": "Booking data", "Formula": "Total Revenue ÷ Total Bookings"},
+                            {"Metric": "Bedrijfskosten %", "Value": f"{bedrijfskosten}%", "Source": "User input", "Formula": "-"},
+                            {"Metric": "Break-even CPA", "Value": f"€{cpa_targets['breakeven_cpa']:.2f}", "Source": "Calculated", "Formula": f"AOV × (1 - {bedrijfskosten}%) = €{cpa_metrics['aov']:.2f} × {(100-bedrijfskosten)/100:.2f}"},
+                            {"Metric": "Winstmarge %", "Value": f"{winstmarge}%", "Source": "User input", "Formula": "-"},
+                            {"Metric": "Target CPA", "Value": f"€{cpa_targets['target_cpa']:.2f}", "Source": "Calculated", "Formula": f"Break-even × (1 - {winstmarge}%) = €{cpa_targets['breakeven_cpa']:.2f} × {(100-winstmarge)/100:.2f}"},
+                        ]
+
+                        if cpa_metrics['retention_rate'] is not None and 'ltv' in cpa_targets:
+                            table_data.extend([
+                                {"Metric": "Retention Rate", "Value": f"{cpa_metrics['retention_rate']:.1%}", "Source": "Booking data", "Formula": "Returning customers ÷ Cohort size"},
+                                {"Metric": "Expected Bookings", "Value": f"{cpa_targets['expected_bookings']:.1f}", "Source": "Calculated", "Formula": f"1 ÷ (1 - {cpa_metrics['retention_rate']:.1%})"},
+                                {"Metric": "LTV", "Value": f"€{cpa_targets['ltv']:.2f}", "Source": "Calculated", "Formula": f"AOV × Expected Bookings"},
+                                {"Metric": "Break-even CPA (LTV)", "Value": f"€{cpa_targets['breakeven_cpa_ltv']:.2f}", "Source": "Calculated", "Formula": f"LTV × (1 - {bedrijfskosten}%)"},
+                                {"Metric": "Target CPA (LTV)", "Value": f"€{cpa_targets['target_cpa_ltv']:.2f}", "Source": "Calculated", "Formula": f"Break-even (LTV) × (1 - {winstmarge}%)"},
+                            ])
+
+                        if actual_cpa is not None:
+                            table_data.append({"Metric": "Actual CPA (DO & CARE only)", "Value": f"€{actual_cpa:.2f}", "Source": "Marketing data", "Formula": "Ad Spend ÷ Conversions (excl. SEE & THINK)"})
+
+                        st.dataframe(
+                            pd.DataFrame(table_data),
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config={
+                                'Metric': st.column_config.TextColumn('Metric', width='medium'),
+                                'Value': st.column_config.TextColumn('Value', width='small'),
+                                'Source': st.column_config.TextColumn('Source', width='small'),
+                                'Formula': st.column_config.TextColumn('Formula', width='large'),
+                            }
+                        )
+
+                        st.markdown(f"""
+                        **Data Summary:**
+                        - Total Bookings: {cpa_metrics['total_bookings']:,}
+                        - Total Revenue: €{cpa_metrics['total_revenue']:,.0f}
+                        - Data Span: {cpa_metrics['data_span_months']:.1f} months
+                        """)
+
+                        if cpa_metrics['retention_rate'] is not None:
+                            st.markdown(f"""
+                            **Retention Analysis:**
+                            - Cohort Size: {cpa_metrics['cohort_size']} first-time customers
+                            - Returning Customers: {cpa_metrics['returning_customers']} (within 2 months)
+                            - Retention Rate: {cpa_metrics['retention_rate']:.1%}
+                            """)
 
     # Reset button
     st.sidebar.markdown("---")

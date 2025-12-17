@@ -187,6 +187,8 @@ if df2 is not None:
 
     if location_col:
         locations = df2[location_col].dropna().unique()
+        # Filter out non-location entries (UTM test, etc.)
+        locations = [loc for loc in locations if str(loc).lower().startswith('kuuma')]
         if len(locations) > 0:
             with st.expander(f"**{len(locations)} locations available**", expanded=False):
                 for loc in sorted(locations):

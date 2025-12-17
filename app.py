@@ -1018,8 +1018,9 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
 
         # Location filter (if location column selected)
         if location_col != "None" and 'location' in processed_data.columns:
-            # Filter out NaN values and sort
-            all_locations = sorted([loc for loc in processed_data['location'].unique() if pd.notna(loc)])
+            # Filter out NaN values and non-location entries (UTM test, etc.)
+            all_locations = sorted([loc for loc in processed_data['location'].unique()
+                                   if pd.notna(loc) and str(loc).lower().startswith('kuuma')])
             selected_locations = st.sidebar.multiselect(
                 "Locations",
                 options=all_locations,
