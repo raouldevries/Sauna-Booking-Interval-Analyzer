@@ -154,6 +154,64 @@ def prepare_chart_data(df, group_col, value_col, agg_func='sum'):
     return result
 
 
+@st.cache_data
+def calculate_distribution_data(interval_categories_tuple):
+    """
+    Calculate lead time distribution data with caching.
+    Takes a tuple of interval categories for hashability.
+    Returns category counts and percentages.
+    """
+    category_order = ["Same day", "1-3 days", "4-7 days", "1-2 weeks", "2+ weeks"]
+    series = pd.Series(interval_categories_tuple)
+    distribution = series.value_counts()
+    distribution = distribution.reindex(category_order, fill_value=0)
+    total = distribution.sum()
+    distribution_pct = (distribution / total * 100).round(1) if total > 0 else distribution
+    return distribution, distribution_pct
+
+
+@st.cache_data
+def calculate_location_stats(df_values, location_col_values, interval_col_values):
+    """
+    Calculate location-wise statistics with caching.
+    Takes column values as tuples for hashability.
+    """
+    import pandas as pd
+    df = pd.DataFrame({
+        'location': location_col_values,
+        'interval_days': interval_col_values
+    })
+
+    stats = df.groupby('location').agg({
+        'interval_days': ['count', 'mean', 'median']
+    }).round(1)
+    stats.columns = ['Total Bookings', 'Avg Lead Time (days)', 'Median Lead Time (days)']
+    stats = stats.sort_values('Total Bookings', ascending=False)
+    stats['Total Bookings'] = stats['Total Bookings'].astype(int)
+    return stats
+
+
+@st.cache_data
+def calculate_heatmap_data(booking_hours, booking_dows):
+    """
+    Calculate heatmap data for booking time analysis with caching.
+    """
+    import pandas as pd
+    day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+
+    df = pd.DataFrame({'booking_hour': list(booking_hours), 'booking_dow': list(booking_dows)})
+    df['booking_dow'] = pd.Categorical(df['booking_dow'], categories=day_order, ordered=True)
+
+    heatmap_pivot = df.groupby(['booking_hour', 'booking_dow']).size().unstack(fill_value=0)
+    heatmap_pivot = heatmap_pivot.reindex(columns=day_order, fill_value=0)
+
+    peak_hour = int(df['booking_hour'].mode().iloc[0]) if len(df) > 0 else 0
+    peak_day = str(df['booking_dow'].mode().iloc[0]) if len(df) > 0 else 'Unknown'
+    evening_pct = (df['booking_hour'] >= 18).sum() / len(df) * 100 if len(df) > 0 else 0
+
+    return heatmap_pivot, peak_hour, peak_day, evening_pct
+
+
 def get_location_column(df):
     """Get the appropriate location column from a dataframe."""
     if df is None:

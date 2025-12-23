@@ -9,7 +9,10 @@ from io import BytesIO, StringIO
 import time
 import os
 import glob
-from data_loader import init_session_state, get_location_column, get_available_locations
+from data_loader import (
+    init_session_state, get_location_column, get_available_locations,
+    calculate_distribution_data, calculate_location_stats, calculate_heatmap_data
+)
 
 # Google Drive imports
 try:
@@ -65,7 +68,7 @@ def get_drive_service():
     except Exception as e:
         return None
 
-@st.cache_data(ttl=300)  # Cache for 5 minutes
+@st.cache_data(ttl=3600)  # Cache for 1 hour (file names rarely change)
 def list_drive_files(folder_id):
     """List all Excel and CSV files in a Google Drive folder."""
     service = get_drive_service()
@@ -446,12 +449,10 @@ if not st.session_state.authenticated:
     with col2:
         st.markdown("<div style='height: 80px'></div>", unsafe_allow_html=True)
 
-        # Kuuma logo centered
-        st.markdown("""
-        <div style="display: flex; justify-content: center; margin-bottom: 2rem;">
-            <img src="https://kuuma.nl/wp-content/themes/kuuma/images/logo.svg" width="180">
-        </div>
-        """, unsafe_allow_html=True)
+        # Kuuma logo centered using columns
+        _, logo_col, _ = st.columns([1.5, 1, 1.5])
+        with logo_col:
+            st.image("assets/logo_black.svg", use_container_width=True)
 
         st.markdown("<h2 style='text-align: center; margin-bottom: 0.5rem;'>Kuuma Booking Analyzer</h2>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #666; margin-bottom: 2rem;'>Customer insights & booking intelligence</p>", unsafe_allow_html=True)
@@ -526,7 +527,7 @@ if not st.session_state.authenticated:
 # Header with logo
 col1, col2 = st.columns([1, 5])
 with col1:
-    st.image("https://kuuma.nl/wp-content/themes/kuuma/images/logo.svg", width=120)
+    st.image("assets/logo_black.svg", width=120)
 with col2:
     st.title("Kuuma Booking Analyzer")
     st.markdown("**Customer insights & booking intelligence**")
@@ -1124,13 +1125,10 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
             # Distribution chart
             st.markdown("### Booking Lead Time Distribution")
 
-            category_order = ["Same day", "1-3 days", "4-7 days", "1-2 weeks", "2+ weeks"]
-            distribution = filtered_data['interval_category'].value_counts()
-            distribution = distribution.reindex(category_order, fill_value=0)
-
-            # Calculate percentages
-            total_bookings = distribution.sum()
-            distribution_pct = (distribution / total_bookings * 100).round(1)
+            # Use cached distribution calculation
+            distribution, distribution_pct = calculate_distribution_data(
+                tuple(filtered_data['interval_category'].tolist())
+            )
 
             # Format text labels with percentage
             text_labels = [f"{pct}%" for pct in distribution_pct.values]
@@ -1188,14 +1186,12 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
                     with some advance planners. A small gap means consistent booking behavior.
                     """)
 
-                location_stats = filtered_data.groupby('location').agg({
-                    'booking_id': 'count',
-                    'interval_days': ['mean', 'median']
-                }).round(1)
-
-                location_stats.columns = ['Total Bookings', 'Avg Lead Time (days)', 'Median Lead Time (days)']
-                location_stats = location_stats.sort_values('Total Bookings', ascending=False)
-                location_stats['Total Bookings'] = location_stats['Total Bookings'].astype(int)
+                # Use cached location stats calculation
+                location_stats = calculate_location_stats(
+                    tuple(filtered_data.index.tolist()),
+                    tuple(filtered_data['location'].tolist()),
+                    tuple(filtered_data['interval_days'].tolist())
+                )
 
                 location_stats_config = {
                     'Total Bookings': st.column_config.NumberColumn('Total Bookings', help='Number of bookings for this location'),
