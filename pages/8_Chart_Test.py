@@ -24,6 +24,12 @@ hide_default_nav = """
 [data-testid="stSidebarNav"] {
     display: none;
 }
+/* Invert logo to white when user's browser is in dark mode */
+@media (prefers-color-scheme: dark) {
+    [data-testid="stImage"] img {
+        filter: invert(1);
+    }
+}
 </style>
 """
 st.markdown(hide_default_nav, unsafe_allow_html=True)
