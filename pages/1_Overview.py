@@ -130,7 +130,8 @@ df2 = st.session_state.get('df2')
 google_ads = st.session_state.get('google_ads_df')
 meta_ads = st.session_state.get('meta_ads_df')
 
-col1, col2, col3, col4 = st.columns(4)
+# Booking data metrics (3 columns)
+col1, col2, col3 = st.columns(3)
 
 with col1:
     if df1 is not None:
@@ -149,6 +150,24 @@ with col2:
         st.caption("Upload or connect Drive")
 
 with col3:
+    if df1 is not None and df2 is not None and len(df1) > 0:
+        cancellations = len(df1) - len(df2)
+        cancellation_rate = (cancellations / len(df1)) * 100
+        st.metric("Cancellation Rate", f"{cancellation_rate:.1f}%")
+        st.caption(f"{cancellations:,} bookings cancelled")
+    else:
+        st.metric("Cancellation Rate", "—")
+        st.caption("Requires both files")
+
+# Explanation for cancellation rate
+if df1 is not None and df2 is not None:
+    st.info(":material/info: The difference between Booking Records and Visit Records represents customers who booked but cancelled before their visit date.")
+
+# Marketing data metrics (2 columns)
+st.markdown("#### Marketing Data")
+col1, col2 = st.columns(2)
+
+with col1:
     if google_ads is not None:
         st.metric("Google Ads Campaigns", f"{len(google_ads):,}")
         st.caption("Campaign rows")
@@ -156,7 +175,7 @@ with col3:
         st.metric("Google Ads", "Not loaded")
         st.caption("Optional")
 
-with col4:
+with col2:
     if meta_ads is not None:
         st.metric("Meta Ads Campaigns", f"{len(meta_ads):,}")
         st.caption("Campaign rows")
