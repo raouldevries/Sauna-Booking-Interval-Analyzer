@@ -1467,21 +1467,6 @@ if st.session_state.df1 is not None and st.session_state.df2 is not None:
                 mime="text/csv"
             )
 
-            # Data preview toggle
-            show_preview = st.sidebar.checkbox("Show data preview", value=False)
-
-            if show_preview:
-                st.markdown("---")
-                st.markdown("### Data Preview")
-
-                with st.expander("File 1 Preview (Booking Creation)", expanded=False):
-                    st.dataframe(df1.head(5), use_container_width=True)
-
-                with st.expander("File 2 Preview (Visit Dates)", expanded=False):
-                    st.dataframe(df2.head(5), use_container_width=True)
-
-                with st.expander("Processed Data Preview", expanded=False):
-                    st.dataframe(filtered_data.head(10), use_container_width=True)
 
         else:
             st.warning("No data matches the selected filters. Try adjusting your date range or location selection.")
