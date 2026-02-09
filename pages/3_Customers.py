@@ -10,7 +10,7 @@ import plotly.graph_objects as go
 from datetime import datetime
 import sys
 sys.path.insert(0, '..')
-from data_loader import init_session_state
+from data_loader import init_session_state, apply_demo_transform
 
 # Page configuration
 st.set_page_config(
@@ -137,7 +137,7 @@ if uploaded_files1:
         for error in errors1:
             st.sidebar.error(f"Error: {error}")
     elif df1 is not None:
-        st.session_state.df1 = df1
+        st.session_state.df1 = apply_demo_transform(df1)
         if len(file_info1) == 1:
             st.sidebar.success(f"Loaded: {len(df1):,} rows")
         else:
@@ -150,7 +150,7 @@ if uploaded_files2:
         for error in errors2:
             st.sidebar.error(f"Error: {error}")
     elif df2 is not None:
-        st.session_state.df2 = df2
+        st.session_state.df2 = apply_demo_transform(df2)
         if len(file_info2) == 1:
             st.sidebar.success(f"Loaded: {len(df2):,} rows")
         else:

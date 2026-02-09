@@ -11,7 +11,8 @@ import os
 import glob
 from data_loader import (
     init_session_state, get_location_column, get_available_locations,
-    calculate_distribution_data, calculate_location_stats, calculate_heatmap_data
+    calculate_distribution_data, calculate_location_stats, calculate_heatmap_data,
+    apply_demo_transform, DEMO_MODE
 )
 
 # Google Drive imports
@@ -494,9 +495,9 @@ if not st.session_state.authenticated:
                     else:
                         progress_bar.progress(95, text="Processing data...")
                         if df1 is not None:
-                            st.session_state.df1 = df1
+                            st.session_state.df1 = apply_demo_transform(df1)
                         if df2 is not None:
-                            st.session_state.df2 = df2
+                            st.session_state.df2 = apply_demo_transform(df2)
                         if google_ads_df is not None:
                             st.session_state.google_ads_df = google_ads_df
                         if meta_ads_df is not None:
@@ -525,9 +526,9 @@ if not st.session_state.authenticated:
                         # Store data in session state
                         update_login_progress(95, "Processing data...")
                         if df1 is not None:
-                            st.session_state.df1 = df1
+                            st.session_state.df1 = apply_demo_transform(df1)
                         if df2 is not None:
-                            st.session_state.df2 = df2
+                            st.session_state.df2 = apply_demo_transform(df2)
                         if google_ads_df is not None:
                             st.session_state.google_ads_df = google_ads_df
                         if meta_ads_df is not None:
@@ -621,6 +622,9 @@ nav_container = st.sidebar.container()
 # Sidebar - Data section
 st.sidebar.header("Data")
 
+if DEMO_MODE:
+    st.sidebar.info(":material/science: **Demo account** — sample data")
+
 # Try to load data automatically (local first, then Google Drive)
 if not st.session_state.drive_loaded:
     # First check for local data (for development/testing)
@@ -636,9 +640,9 @@ if not st.session_state.drive_loaded:
         else:
             progress_bar.progress(95, text="Processing data...")
             if df1 is not None:
-                st.session_state.df1 = df1
+                st.session_state.df1 = apply_demo_transform(df1)
             if df2 is not None:
-                st.session_state.df2 = df2
+                st.session_state.df2 = apply_demo_transform(df2)
             if google_ads_df is not None:
                 st.session_state.google_ads_df = google_ads_df
             if meta_ads_df is not None:
@@ -665,9 +669,9 @@ if not st.session_state.drive_loaded:
         else:
             update_sidebar_progress(95, "Processing data...")
             if df1 is not None:
-                st.session_state.df1 = df1
+                st.session_state.df1 = apply_demo_transform(df1)
             if df2 is not None:
-                st.session_state.df2 = df2
+                st.session_state.df2 = apply_demo_transform(df2)
             if google_ads_df is not None:
                 st.session_state.google_ads_df = google_ads_df
             if meta_ads_df is not None:
@@ -713,7 +717,7 @@ if st.session_state.drive_loaded:
                 for error in errors1:
                     st.error(f"Error: {error}")
             elif df1 is not None:
-                st.session_state.df1 = df1
+                st.session_state.df1 = apply_demo_transform(df1)
                 st.success(f"Loaded: {len(df1):,} rows")
 
         if uploaded_files2:
@@ -722,7 +726,7 @@ if st.session_state.drive_loaded:
                 for error in errors2:
                     st.error(f"Error: {error}")
             elif df2 is not None:
-                st.session_state.df2 = df2
+                st.session_state.df2 = apply_demo_transform(df2)
                 st.success(f"Loaded: {len(df2):,} rows")
 
 if not st.session_state.drive_loaded:
@@ -750,7 +754,7 @@ if not st.session_state.drive_loaded:
             for error in errors1:
                 st.sidebar.error(f"Error: {error}")
         elif df1 is not None:
-            st.session_state.df1 = df1
+            st.session_state.df1 = apply_demo_transform(df1)
             if len(file_info1) == 1:
                 st.sidebar.success(f"Loaded: {len(df1):,} rows")
             else:
@@ -766,7 +770,7 @@ if not st.session_state.drive_loaded:
             for error in errors2:
                 st.sidebar.error(f"Error: {error}")
         elif df2 is not None:
-            st.session_state.df2 = df2
+            st.session_state.df2 = apply_demo_transform(df2)
             if len(file_info2) == 1:
                 st.sidebar.success(f"Loaded: {len(df2):,} rows")
             else:

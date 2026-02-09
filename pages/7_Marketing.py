@@ -10,7 +10,7 @@ import plotly.graph_objects as go
 from io import StringIO
 import sys
 sys.path.insert(0, '..')
-from data_loader import init_session_state
+from data_loader import init_session_state, apply_demo_transform
 
 # Page configuration
 st.set_page_config(
@@ -1128,13 +1128,13 @@ def load_default_files():
     if st.session_state.df1 is None:
         df = _load_local_excel(DEFAULT_BOOKING_CREATION)
         if df is not None:
-            st.session_state.df1 = df
+            st.session_state.df1 = apply_demo_transform(df)
 
     # Load booking data (df2 - visit dates)
     if st.session_state.df2 is None:
         df = _load_local_excel(DEFAULT_VISIT_DATES)
         if df is not None:
-            st.session_state.df2 = df
+            st.session_state.df2 = apply_demo_transform(df)
 
     # Load Google Ads data
     if st.session_state.google_ads_df is None:

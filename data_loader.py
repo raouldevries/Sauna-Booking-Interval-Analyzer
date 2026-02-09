@@ -5,12 +5,65 @@ Provides shared data loading and caching functions used across all pages.
 
 import streamlit as st
 import pandas as pd
+import hashlib
+import time
 from io import BytesIO
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Tuple, Dict, Optional, Callable
+from datetime import datetime, timedelta
+
+# Demo mode: obfuscates sensitive data so the dashboard can be shown externally.
+# Set to False to see real data.
+DEMO_MODE = True
+_DEMO_MULTIPLIER = 1.37
+
+
+def apply_demo_transform(df):
+    """Apply demo transformations to obfuscate sensitive business data.
+
+    - Multiplies financial columns (Total gross) by a fixed factor
+    - Multiplies participant counts by the same factor (rounded to int)
+    - Anonymizes email addresses with consistent hashing
+    """
+    if df is None or not DEMO_MODE:
+        return df
+
+    df = df.copy()
+
+    # Financial columns
+    if 'Total gross' in df.columns:
+        df['Total gross'] = (df['Total gross'] * _DEMO_MULTIPLIER).round(2)
+
+    # Participant counts (must stay integer)
+    for col in ['Participants', 'Adults']:
+        if col in df.columns:
+            df[col] = (df[col] * _DEMO_MULTIPLIER).round().astype(int)
+
+    # Anonymize email addresses with consistent hash (same email -> same fake email)
+    if 'Email address' in df.columns:
+        def anonymize_email(email):
+            if pd.isna(email) or email == '':
+                return email
+            h = hashlib.md5(str(email).encode()).hexdigest()[:8]
+            return f"customer_{h}@demo.com"
+        df['Email address'] = df['Email address'].apply(anonymize_email)
+
+    # Anonymize names
+    if 'Name' in df.columns:
+        def anonymize_name(name):
+            if pd.isna(name) or name == '':
+                return name
+            h = hashlib.md5(str(name).encode()).hexdigest()[:6]
+            return f"Customer {h.upper()}"
+        df['Name'] = df['Name'].apply(anonymize_name)
+
+    return df
 
 
 def init_session_state():
     """Initialize all session state variables for data storage."""
     defaults = {
+        # Existing keys
         'df1': None,           # Booking creation dates
         'df2': None,           # Visit dates
         'google_ads_df': None, # Google Ads data
@@ -18,6 +71,13 @@ def init_session_state():
         'drive_loaded': False, # Flag for Drive loading
         'processed_data': None, # Cached processed data
         'data_hash': None,     # Hash to detect data changes
+
+        # Bookeo-specific state
+        'bookeo_loaded': False,        # Flag for Bookeo API loading
+        'bookeo_last_refresh': None,   # Timestamp of last API refresh
+        'bookeo_errors': {},           # {account_key: error_message}
+        'data_source': 'auto',         # 'auto', 'bookeo', 'drive', 'upload'
+        'loading_status': {},          # {account_key: 'pending'|'loading'|'complete'|'error'}
     }
 
     for key, default_value in defaults.items():
@@ -34,6 +94,463 @@ def is_marketing_data_loaded():
     """Check if marketing data is loaded in session state."""
     return (st.session_state.get('google_ads_df') is not None or
             st.session_state.get('meta_ads_df') is not None)
+
+
+def is_bookeo_data_loaded() -> bool:
+    """Check if Bookeo data is currently loaded in session state."""
+    return st.session_state.get('bookeo_loaded', False)
+
+
+def estimate_loading_time(days: int, num_accounts: int = 3) -> str:
+    """
+    Estimate loading time based on date range and number of accounts.
+
+    Based on observed performance (calibrated 2026-01-10):
+    - ~5 seconds per day of data (API pagination + rate limits)
+    - 3 accounts fetch in parallel but each has overhead
+    - Historical data (>7 days old) is cached after first load
+
+    Args:
+        days: Number of days in the date range
+        num_accounts: Number of Bookeo accounts configured
+
+    Returns:
+        Formatted string like "~2 minutes" or "~15 minutes",
+        or empty string if estimate not needed (< 7 days)
+    """
+    if days < 7:
+        return ""
+
+    # Base constants (calibrated from actual testing: 160 days ≈ 15 min)
+    SECONDS_PER_DAY = 4.5  # ~4.5 seconds per day (includes API pagination)
+    BASE_OVERHEAD = 10  # Initial connection overhead
+
+    # Calculate base time
+    estimated_seconds = BASE_OVERHEAD + (days * SECONDS_PER_DAY)
+
+    # Account overhead (accounts fetch in parallel, ~25% slower than single)
+    if num_accounts > 1:
+        estimated_seconds *= 1.25
+
+    # Round to reasonable precision
+    estimated_seconds = round(estimated_seconds)
+
+    # Format the output
+    if estimated_seconds < 60:
+        return f"~{estimated_seconds} seconds"
+    else:
+        minutes = round(estimated_seconds / 60)
+        return f"~{minutes} minute{'s' if minutes > 1 else ''}"
+
+
+def _fetch_account_data(
+    account_key: str,
+    start_date: datetime,
+    end_date: datetime,
+    include_canceled: bool
+) -> Tuple[str, Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[str]]:
+    """Fetch data for a single account. Returns (account_key, df1, df2, error)."""
+    from bookeo_transformer import fetch_and_transform_bookings
+
+    try:
+        df1, df2, error = fetch_and_transform_bookings(
+            account_key=account_key,
+            start_date=start_date,
+            end_date=end_date,
+            include_canceled=include_canceled
+        )
+        return (account_key, df1, df2, error)
+    except Exception as e:
+        return (account_key, None, None, f"Unexpected error: {e}")
+
+
+def load_bookeo_data(
+    start_date,
+    end_date,
+    include_canceled: bool = False,
+    progress_callback: Optional[Callable[[int, str], None]] = None,
+    max_workers: int = 3
+) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Dict[str, str]]:
+    """
+    Load booking data from all configured Bookeo accounts in parallel.
+
+    Returns (df1, df2, errors_dict) where errors_dict maps account_key -> error message.
+    """
+    from bookeo_config import get_bookeo_accounts, is_bookeo_configured
+    from bookeo_transformer import merge_multi_account_data
+
+    def update_progress(percent: int, text: str):
+        if progress_callback:
+            progress_callback(percent, text)
+
+    if not is_bookeo_configured():
+        return None, None, {'config': 'Bookeo API not configured in secrets'}
+
+    accounts = get_bookeo_accounts()
+    if not accounts:
+        return None, None, {'config': 'No Bookeo accounts configured'}
+
+    account_data = {}
+    errors = {}
+    total = len(accounts)
+
+    # Initialize per-account loading status
+    st.session_state.loading_status = {acc.key: 'pending' for acc in accounts}
+
+    update_progress(10, f"Fetching from {total} accounts in parallel...")
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_account = {
+            executor.submit(_fetch_account_data, acc.key, start_date, end_date, include_canceled): acc
+            for acc in accounts
+        }
+
+        for i, future in enumerate(as_completed(future_to_account), 1):
+            account = future_to_account[future]
+
+            try:
+                account_key, df1, df2, error = future.result()
+                if error:
+                    errors[account_key] = error
+                    st.session_state.loading_status[account_key] = 'error'
+                elif df1 is not None and len(df1) > 0:
+                    account_data[account_key] = (df1, df2)
+                    st.session_state.loading_status[account_key] = 'complete'
+                else:
+                    st.session_state.loading_status[account_key] = 'complete'
+            except Exception as e:
+                errors[account.key] = f"Thread error: {e}"
+                st.session_state.loading_status[account.key] = 'error'
+
+            update_progress(int((i / total) * 70) + 20, f"Loaded {account.name} ({i}/{total})")
+
+    if not account_data:
+        return None, None, errors
+
+    update_progress(92, "Merging data from all accounts...")
+    merged_df1, merged_df2 = merge_multi_account_data(account_data)
+    update_progress(98, "Finalizing...")
+
+    return merged_df1, merged_df2, errors
+
+
+def _format_elapsed_time(seconds: float) -> str:
+    """Format elapsed time as 'Xs' or 'M:SS'."""
+    if seconds < 60:
+        return f"{int(seconds)}s"
+    else:
+        minutes = int(seconds // 60)
+        secs = int(seconds % 60)
+        return f"{minutes}:{secs:02d}"
+
+
+def _inject_ticking_timer(days_range: int, time_estimate: str):
+    """Inject JavaScript to create a ticking timer in the status label."""
+    estimate_text = f" / {time_estimate}" if time_estimate else ""
+    js_code = f"""
+    <script>
+    (function() {{
+        // Find the status label (summary element in details)
+        const findStatusLabel = () => {{
+            const summaries = document.querySelectorAll('details[data-testid="stExpander"] summary span');
+            for (const span of summaries) {{
+                if (span.textContent && span.textContent.includes('Fetching')) {{
+                    return span;
+                }}
+            }}
+            return null;
+        }};
+
+        let startTime = Date.now();
+        let timerInterval = null;
+
+        const formatTime = (seconds) => {{
+            if (seconds < 60) {{
+                return seconds + 's';
+            }} else {{
+                const mins = Math.floor(seconds / 60);
+                const secs = seconds % 60;
+                return mins + ':' + String(secs).padStart(2, '0');
+            }}
+        }};
+
+        const updateTimer = () => {{
+            const label = findStatusLabel();
+            if (label && label.textContent.includes('Fetching')) {{
+                const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                const elapsedStr = formatTime(elapsed);
+                label.textContent = 'Fetching {days_range} days of booking data... (' + elapsedStr + '{estimate_text})';
+            }} else if (label && (label.textContent.includes('Complete') || label.textContent.includes('error'))) {{
+                // Stop timer when loading completes
+                if (timerInterval) {{
+                    clearInterval(timerInterval);
+                    timerInterval = null;
+                }}
+            }}
+        }};
+
+        // Start timer after a short delay to let Streamlit render
+        setTimeout(() => {{
+            timerInterval = setInterval(updateTimer, 1000);
+        }}, 100);
+
+        // Clean up after 5 minutes (safety)
+        setTimeout(() => {{
+            if (timerInterval) {{
+                clearInterval(timerInterval);
+            }}
+        }}, 300000);
+    }})();
+    </script>
+    """
+    st.components.v1.html(js_code, height=0)
+
+
+def load_bookeo_data_with_status(
+    start_date,
+    end_date,
+    include_canceled: bool = False,
+    date_basis: str = 'created'
+) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Dict[str, str]]:
+    """
+    Load booking data with detailed st.status() UI showing per-account progress.
+
+    Args:
+        start_date: Start of date range
+        end_date: End of date range
+        include_canceled: Include canceled bookings
+        date_basis: 'created' to filter by booking creation date, 'visit' for visit date
+
+    Returns (df1, df2, errors_dict) where errors_dict maps account_key -> error message.
+    """
+    from bookeo_config import get_bookeo_accounts, is_bookeo_configured
+    from bookeo_transformer import merge_multi_account_data, fetch_and_transform_bookings
+
+    if not is_bookeo_configured():
+        return None, None, {'config': 'Bookeo API not configured in secrets'}
+
+    accounts = get_bookeo_accounts()
+    if not accounts:
+        return None, None, {'config': 'No Bookeo accounts configured'}
+
+    # Fetch exactly what the user selected - no hidden buffers
+    fetch_start = start_date
+    fetch_end = end_date
+
+    # Calculate days for display and time estimate
+    days_range = (end_date - start_date).days
+    fetch_days = (fetch_end - fetch_start).days
+    time_estimate = estimate_loading_time(fetch_days, len(accounts))
+
+    # Track elapsed time
+    start_time = time.time()
+
+    def get_time_label():
+        """Get status label with elapsed time vs estimate."""
+        elapsed = time.time() - start_time
+        elapsed_str = _format_elapsed_time(elapsed)
+        if time_estimate:
+            return f"Fetching {days_range} days of booking data... ({elapsed_str} / {time_estimate})"
+        else:
+            return f"Fetching {days_range} days of booking data... ({elapsed_str})"
+
+    account_data = {}
+    errors = {}
+
+    # Inject JavaScript ticking timer
+    _inject_ticking_timer(days_range, time_estimate)
+
+    with st.status(get_time_label(), expanded=True) as status:
+        for i, account in enumerate(accounts, 1):
+            # Update status label with current elapsed time
+            status.update(label=get_time_label())
+
+            # Create placeholder for live updates
+            status_placeholder = st.empty()
+            status_placeholder.write(f"**{account.name}** - Connecting...")
+
+            # Callback to update status in real-time
+            def make_status_callback(placeholder, name, status_obj, time_fn):
+                def callback(msg):
+                    placeholder.write(f"**{name}** - {msg}")
+                    # Update elapsed time in status label
+                    status_obj.update(label=time_fn())
+                return callback
+
+            try:
+                df1, df2, error = fetch_and_transform_bookings(
+                    account_key=account.key,
+                    start_date=fetch_start,
+                    end_date=fetch_end,
+                    include_canceled=include_canceled,
+                    status_callback=make_status_callback(status_placeholder, account.name, status, get_time_label),
+                    date_basis=date_basis
+                )
+
+                if error:
+                    errors[account.key] = error
+                    status_placeholder.write(f"**{account.name}** - :material/error: {error}")
+                elif df1 is not None and len(df1) > 0:
+                    account_data[account.key] = (df1, df2)
+                    booking_count = len(df1)
+                    visit_count = len(df2) if df2 is not None else 0
+                    status_placeholder.write(f"**{account.name}** - :material/check: {booking_count:,} bookings, {visit_count:,} visits")
+                else:
+                    status_placeholder.write(f"**{account.name}** - :material/check: No bookings found")
+
+            except Exception as e:
+                errors[account.key] = f"Error: {e}"
+                status_placeholder.write(f"**{account.name}** - :material/error: {e}")
+
+        # Merge data from all accounts
+        if account_data:
+            st.write("Merging data from all accounts...")
+            merged_df1, merged_df2 = merge_multi_account_data(account_data)
+
+            total_bookings = len(merged_df1) if merged_df1 is not None else 0
+            elapsed = time.time() - start_time
+            elapsed_str = _format_elapsed_time(elapsed)
+            status.update(label=f"Complete! {total_bookings:,} bookings loaded in {elapsed_str}", state="complete", expanded=False)
+            return merged_df1, merged_df2, errors
+        else:
+            elapsed = time.time() - start_time
+            elapsed_str = _format_elapsed_time(elapsed)
+            status.update(label=f"No data loaded ({elapsed_str})", state="error", expanded=False)
+            return None, None, errors
+
+
+def refresh_bookeo_cache():
+    """Clear Bookeo data cache to force fresh fetch."""
+    from bookeo_transformer import _fetch_historical_bookings, _fetch_recent_bookings
+
+    # Clear both cached functions
+    _fetch_historical_bookings.clear()
+    _fetch_recent_bookings.clear()
+
+    # Reset session state
+    st.session_state.bookeo_loaded = False
+    st.session_state.bookeo_last_refresh = None
+    st.session_state.loading_status = {}
+    st.session_state.df1 = None
+    st.session_state.df2 = None
+
+
+def render_bookeo_settings(page_key: str = "default"):
+    """
+    Render the Bookeo API Settings component in the main content area.
+
+    Args:
+        page_key: Unique key prefix for this page's widgets to avoid duplicate key errors
+    """
+    from datetime import datetime, timedelta
+    from bookeo_config import is_bookeo_configured, get_bookeo_accounts
+    import time
+
+    if not is_bookeo_configured():
+        return
+
+    # Shared preload cache (same as app.py)
+    @st.cache_resource
+    def get_preload_cache():
+        return {'complete': False, 'loading': False, 'status': ''}
+
+    preload_cache = get_preload_cache()
+    is_preloading = preload_cache.get('loading') and not preload_cache.get('complete')
+
+    # If preloading just completed, transfer data to session state
+    if preload_cache.get('complete') and 'df1' in preload_cache and not st.session_state.get('bookeo_loaded'):
+        st.session_state.df1 = preload_cache['df1']
+        st.session_state.df2 = preload_cache['df2']
+        st.session_state.bookeo_start_date = preload_cache['start_date']
+        st.session_state.bookeo_end_date = preload_cache['end_date']
+        st.session_state.bookeo_loaded = True
+        st.session_state.bookeo_last_refresh = preload_cache['timestamp']
+        st.session_state.drive_loaded = True
+        st.session_state.data_source = 'bookeo'
+        st.rerun()
+
+    # Initialize bookeo date range in session state (default: last 7 days)
+    if 'bookeo_start_date' not in st.session_state:
+        st.session_state.bookeo_start_date = datetime.now() - timedelta(days=7)
+    if 'bookeo_end_date' not in st.session_state:
+        st.session_state.bookeo_end_date = datetime.now()
+
+    # Create expander for settings
+    with st.expander("Select a date range", expanded=not st.session_state.get('bookeo_loaded', False)):
+        col1, col2 = st.columns(2)
+        with col1:
+            bookeo_start = st.date_input(
+                "From",
+                value=st.session_state.bookeo_start_date,
+                key=f"{page_key}_bookeo_start_input",
+                format="DD/MM/YYYY"
+            )
+        with col2:
+            bookeo_end = st.date_input(
+                "To",
+                value=st.session_state.bookeo_end_date,
+                key=f"{page_key}_bookeo_end_input",
+                format="DD/MM/YYYY"
+            )
+
+        # Store dates in session state
+        st.session_state.bookeo_start_date = datetime.combine(bookeo_start, datetime.min.time())
+        st.session_state.bookeo_end_date = datetime.combine(bookeo_end, datetime.max.time())
+
+        include_canceled = st.checkbox("Include canceled bookings", value=True, key=f"{page_key}_bookeo_include_canceled")
+
+        # Default to creation date (when booking was made) - matches Mollie revenue
+        date_basis = 'created'
+
+        # Load/Refresh buttons
+        col1, col2, col3 = st.columns([1, 1, 2])
+        with col1:
+            load_bookeo = st.button("Load", key=f"{page_key}_load_bookeo_btn", use_container_width=True)
+        with col2:
+            refresh_bookeo = st.button("Refresh", key=f"{page_key}_refresh_bookeo_btn", use_container_width=True)
+        with col3:
+            if st.session_state.get('bookeo_last_refresh'):
+                st.caption(f"Last updated: {st.session_state.bookeo_last_refresh.strftime('%H:%M')}")
+
+        # Show loading status (for background preload)
+        if is_preloading:
+            status_text = preload_cache.get('status', 'Loading booking data...')
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.info(f":material/sync: {status_text}")
+            with col2:
+                if st.button("Check status", key=f"{page_key}_check_preload_status"):
+                    st.rerun()
+
+        # Handle Bookeo loading (user clicked Load or Refresh)
+        if load_bookeo or refresh_bookeo:
+            if refresh_bookeo:
+                refresh_bookeo_cache()
+
+            # Load with detailed status UI
+            df1, df2, errors = load_bookeo_data_with_status(
+                start_date=st.session_state.bookeo_start_date,
+                end_date=st.session_state.bookeo_end_date,
+                include_canceled=include_canceled,
+                date_basis=date_basis
+            )
+
+            if errors:
+                for account_key, error_msg in errors.items():
+                    if account_key != 'config':  # Don't show config errors twice
+                        st.warning(f"{account_key}: {error_msg}")
+
+            if df1 is not None and len(df1) > 0:
+                st.session_state.df1 = df1
+                st.session_state.df2 = df2
+                st.session_state.bookeo_loaded = True
+                st.session_state.bookeo_last_refresh = datetime.now()
+                st.session_state.drive_loaded = True
+                st.session_state.data_source = 'bookeo'
+                st.rerun()  # Refresh to update UI with new data and timestamp
+            else:
+                if not errors:
+                    st.warning("No bookings found in selected date range")
 
 
 def get_data_hash(df1, df2):
