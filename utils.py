@@ -58,12 +58,15 @@ def setup_page(page_title="Kuuma Booking Analyzer"):
 
 def render_header():
     """Render the app header with logo"""
+    from data_loader import DEMO_MODE
     col1, col2 = st.columns([1, 5])
     with col1:
         st.image("assets/logo_black.svg", width=120)
     with col2:
         st.title("Kuuma Booking Analyzer")
         st.markdown("**Customer insights & booking intelligence**")
+    if DEMO_MODE:
+        st.info(":material/science: **Demo account** — All data shown is sample data for demonstration purposes")
 
 
 def render_sidebar_navigation():

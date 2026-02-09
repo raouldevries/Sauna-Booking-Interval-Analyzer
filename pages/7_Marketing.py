@@ -10,7 +10,7 @@ import plotly.graph_objects as go
 from io import StringIO
 import sys
 sys.path.insert(0, '..')
-from data_loader import init_session_state, apply_demo_transform
+from data_loader import init_session_state, apply_demo_transform, DEMO_MODE
 
 # Page configuration
 st.set_page_config(
@@ -1088,6 +1088,9 @@ with col1:
 with col2:
     st.title("Kuuma Booking Analyzer")
     st.markdown("**Customer insights & booking intelligence**")
+
+if DEMO_MODE:
+    st.info(":material/science: **Demo account** — All data shown is sample data for demonstration purposes")
 
 st.markdown("## Marketing Campaign Analysis")
 st.markdown("Analyze Google Ads and Meta Ads performance using the SEE-THINK-DO-CARE framework")
