@@ -62,7 +62,7 @@ if 'authenticated' not in st.session_state:
 def get_drive_service():
     """Connect to Google Drive using service account credentials."""
     if not GOOGLE_DRIVE_AVAILABLE:
-        return None
+        return None, "Google Drive libraries not installed"
 
     try:
         credentials = service_account.Credentials.from_service_account_info(
@@ -70,14 +70,14 @@ def get_drive_service():
             scopes=['https://www.googleapis.com/auth/drive.readonly']
         )
         service = build('drive', 'v3', credentials=credentials)
-        return service
+        return service, None
     except Exception as e:
-        return None
+        return None, f"Drive authentication failed: {e}"
 
 @st.cache_data(ttl=3600)  # Cache for 1 hour (file names rarely change)
 def list_drive_files(folder_id):
     """List all Excel and CSV files in a Google Drive folder."""
-    service = get_drive_service()
+    service, err = get_drive_service()
     if not service:
         return []
 
@@ -93,7 +93,7 @@ def list_drive_files(folder_id):
 @st.cache_data(ttl=14400, show_spinner=False)  # Cache for 4 hours
 def download_drive_file_bytes(file_id, file_name):
     """Download a file from Google Drive and return as bytes (cached)."""
-    service = get_drive_service()
+    service, err = get_drive_service()
     if not service:
         return None
 
@@ -131,11 +131,16 @@ def load_files_from_drive(progress_callback=None):
         return None, None, None, None, "No Google Drive folder configured"
 
     update_progress(5, "Connecting to Google Drive...")
+
+    service, auth_error = get_drive_service()
+    if not service:
+        return None, None, None, None, auth_error or "Could not connect to Google Drive"
+
     folder_id = st.secrets["google_drive"]["folder_id"]
     files = list_drive_files(folder_id)
 
     if not files:
-        return None, None, None, None, "No files found in Drive folder"
+        return None, None, None, None, f"No Excel/CSV files found in Drive folder ({folder_id})"
 
     update_progress(10, "Scanning files...")
 
@@ -166,8 +171,12 @@ def load_files_from_drive(progress_callback=None):
         elif 'booking' in name_lower or 'created' in name_lower or 'boeking' in name_lower:
             booking_files.append(f)
 
-    # Calculate total files for progress
+    # Check if any files were classified
     total_files = len(booking_files) + len(visit_files) + len(google_ads_files) + len(meta_ads_files)
+    if total_files == 0:
+        unclassified = [f['name'] for f in files]
+        return None, None, None, None, f"Found {len(files)} file(s) but none matched expected naming patterns: {unclassified}"
+
     files_loaded = 0
     base_progress = 15  # Start at 15% after scanning
     progress_per_file = 70 / max(total_files, 1)  # Use 15-85% for file loading
@@ -479,20 +488,24 @@ if not st.session_state.authenticated:
 
                     df1, df2, google_ads_df, meta_ads_df, error = load_local_files()
 
-                    progress_bar.progress(95, text="Processing data...")
-                    if df1 is not None:
-                        st.session_state.df1 = df1
-                    if df2 is not None:
-                        st.session_state.df2 = df2
-                    if google_ads_df is not None:
-                        st.session_state.google_ads_df = google_ads_df
-                    if meta_ads_df is not None:
-                        st.session_state.meta_ads_df = meta_ads_df
-                    st.session_state.drive_loaded = True
+                    if error:
+                        progress_bar.empty()
+                        st.warning(f"Local data: {error}")
+                    else:
+                        progress_bar.progress(95, text="Processing data...")
+                        if df1 is not None:
+                            st.session_state.df1 = df1
+                        if df2 is not None:
+                            st.session_state.df2 = df2
+                        if google_ads_df is not None:
+                            st.session_state.google_ads_df = google_ads_df
+                        if meta_ads_df is not None:
+                            st.session_state.meta_ads_df = meta_ads_df
+                        st.session_state.drive_loaded = True
 
-                    progress_bar.progress(100, text="Complete!")
-                    time.sleep(0.3)
-                    progress_bar.empty()
+                        progress_bar.progress(100, text="Complete!")
+                        time.sleep(0.3)
+                        progress_bar.empty()
 
                 # Otherwise try Google Drive
                 elif GOOGLE_DRIVE_AVAILABLE and "gcp_service_account" in st.secrets and "google_drive" in st.secrets:
@@ -505,24 +518,33 @@ if not st.session_state.authenticated:
                     # Load data with progress callback
                     df1, df2, google_ads_df, meta_ads_df, error = load_files_from_drive(progress_callback=update_login_progress)
 
-                    # Store data in session state
-                    update_login_progress(95, "Processing data...")
-                    if df1 is not None:
-                        st.session_state.df1 = df1
-                    if df2 is not None:
-                        st.session_state.df2 = df2
-                    if google_ads_df is not None:
-                        st.session_state.google_ads_df = google_ads_df
-                    if meta_ads_df is not None:
-                        st.session_state.meta_ads_df = meta_ads_df
-                    st.session_state.drive_loaded = True
+                    if error:
+                        progress_bar.empty()
+                        st.warning(f"Google Drive: {error}")
+                    else:
+                        # Store data in session state
+                        update_login_progress(95, "Processing data...")
+                        if df1 is not None:
+                            st.session_state.df1 = df1
+                        if df2 is not None:
+                            st.session_state.df2 = df2
+                        if google_ads_df is not None:
+                            st.session_state.google_ads_df = google_ads_df
+                        if meta_ads_df is not None:
+                            st.session_state.meta_ads_df = meta_ads_df
+                        st.session_state.drive_loaded = True
 
-                    # Complete progress
-                    update_login_progress(100, "Complete!")
-                    time.sleep(0.3)
-                    progress_bar.empty()
+                        # Complete progress
+                        update_login_progress(100, "Complete!")
+                        time.sleep(0.3)
+                        progress_bar.empty()
 
-                st.switch_page("pages/1_Overview.py")
+                if st.session_state.drive_loaded and (
+                    st.session_state.df1 is not None or st.session_state.df2 is not None
+                ):
+                    st.switch_page("pages/1_Overview.py")
+                else:
+                    st.rerun()
             else:
                 st.error("Incorrect password. Please try again.")
 
