@@ -7,7 +7,7 @@ import streamlit as st
 import pandas as pd
 import sys
 sys.path.insert(0, '..')
-from data_loader import init_session_state, DEMO_MODE
+from data_loader import init_session_state
 
 # Page configuration
 st.set_page_config(
@@ -48,9 +48,6 @@ with col1:
 with col2:
     st.title("Kuuma Booking Analyzer")
     st.markdown("**Customer insights & booking intelligence**")
-
-if DEMO_MODE:
-    st.info(":material/science: **Demo account** — All data shown is sample data for demonstration purposes")
 
 # Navigation in sidebar
 st.sidebar.header("Navigation")

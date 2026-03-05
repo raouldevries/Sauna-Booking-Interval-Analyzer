@@ -561,9 +561,6 @@ with col2:
     st.title("Kuuma Booking Analyzer")
     st.markdown("**Customer insights & booking intelligence**")
 
-if DEMO_MODE:
-    st.info(":material/science: **Demo account** — All data shown is sample data for demonstration purposes")
-
 # Reserve container for date range selector (filled after data loads)
 date_range_container = st.container()
 

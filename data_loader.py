@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 
 # Demo mode: obfuscates sensitive data so the dashboard can be shown externally.
 # Set to False to see real data.
-DEMO_MODE = True
+DEMO_MODE = False
 _DEMO_MULTIPLIER = 1.37
 
 

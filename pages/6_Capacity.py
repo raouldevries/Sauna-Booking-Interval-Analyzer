@@ -10,7 +10,7 @@ import plotly.graph_objects as go
 from datetime import datetime
 import sys
 sys.path.insert(0, '..')
-from data_loader import init_session_state, apply_demo_transform, DEMO_MODE
+from data_loader import init_session_state, apply_demo_transform
 
 # Page configuration
 st.set_page_config(
@@ -111,9 +111,6 @@ with col1:
 with col2:
     st.title("Kuuma Booking Analyzer")
     st.markdown("**Customer insights & booking intelligence**")
-
-if DEMO_MODE:
-    st.info(":material/science: **Demo account** — All data shown is sample data for demonstration purposes")
 
 # Reserve container for date range selector (filled after data loads)
 date_range_container = st.container()
